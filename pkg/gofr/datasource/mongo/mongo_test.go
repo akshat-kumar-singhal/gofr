@@ -37,11 +37,13 @@ func newMockClient(mt *mtest.T, instr observability.Instrumenter) *Client {
 }
 
 // setupMockInstrumenter creates a mock instrumenter with AddTrace and OperationStats expectations.
-// If expectedOperation is non-empty, AddTrace will assert the operation matches.
-func setupMockInstrumenter(t *testing.T, expectedOperation string) *observability.MockInstrumenter {
+// It accepts a gomock.Controller to use the same controller as the test.
+// count controls the expected number of instrumentation calls:
+// - count = 0: No instrumentation calls expected (validation fails before instrumentation)
+// - count = 1: Expects one AddTrace + one OperationStats call
+func setupMockInstrumenter(t *testing.T, ctrl *gomock.Controller, expectedOperation string, count int) *observability.MockInstrumenter {
 	t.Helper()
 
-	ctrl := gomock.NewController(t)
 	mockInstr := observability.NewMockInstrumenter(ctrl)
 
 	mockInstr.EXPECT().
@@ -52,11 +54,11 @@ func setupMockInstrumenter(t *testing.T, expectedOperation string) *observabilit
 			}
 
 			return ctx, nil
-		})
+		}).Times(count)
 
 	mockInstr.EXPECT().
 		OperationStats(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Times(1)
+		Times(count)
 
 	return mockInstr
 }
@@ -285,7 +287,10 @@ func Test_InsertOne(t *testing.T) {
 
 	for _, tc := range tests {
 		mt.Run(tc.name, func(mt *mtest.T) {
-			mockInstr := setupMockInstrumenter(t, tc.expectedOperation)
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOperation, 1)
 			cl := newMockClient(mt, mockInstr)
 
 			tc.mockResponse(mt)
@@ -333,7 +338,10 @@ func Test_InsertMany(t *testing.T) {
 
 	for _, tc := range tests {
 		mt.Run(tc.name, func(mt *mtest.T) {
-			mockInstr := setupMockInstrumenter(t, "")
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockInstr := setupMockInstrumenter(t, ctrl, "", 1)
 			cl := newMockClient(mt, mockInstr)
 
 			tc.mockResponse(mt)
@@ -359,13 +367,17 @@ func Test_InsertMany(t *testing.T) {
 func Test_CreateCollection(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("createCollection", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "createCollection", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
+
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
 		err := cl.CreateCollection(context.Background(), mt.Coll.Name())
@@ -374,7 +386,10 @@ func Test_CreateCollection(t *testing.T) {
 	})
 
 	mt.Run("createCollectionInstrumentation", func(mt *mtest.T) {
-		mockInstr := setupMockInstrumenter(t, "createCollection")
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "createCollection", 1)
 		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
@@ -386,13 +401,16 @@ func Test_CreateCollection(t *testing.T) {
 func Test_FindMultipleCommands(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("FindSuccess", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
 
 		var foundDocuments []any
 
@@ -415,7 +433,16 @@ func Test_FindMultipleCommands(t *testing.T) {
 	})
 
 	mt.Run("FindCursorError", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
+
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
 		err := cl.Find(context.Background(), mt.Coll.Name(), bson.D{{}}, nil)
@@ -424,7 +451,15 @@ func Test_FindMultipleCommands(t *testing.T) {
 	})
 
 	mt.Run("FindCursorParseError", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
 
 		var foundDocuments []any
 
@@ -446,7 +481,10 @@ func Test_FindMultipleCommands(t *testing.T) {
 	})
 
 	mt.Run("FindInstrumentation", func(mt *mtest.T) {
-		mockInstr := setupMockInstrumenter(t, "find")
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
 		cl := newMockClient(mt, mockInstr)
 
 		id1 := primitive.NewObjectID()
@@ -466,13 +504,16 @@ func Test_FindMultipleCommands(t *testing.T) {
 func Test_FindOneCommands(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("FindOneSuccess", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "findOne", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
 
 		type user struct {
 			ID    primitive.ObjectID
@@ -501,7 +542,15 @@ func Test_FindOneCommands(t *testing.T) {
 	})
 
 	mt.Run("FindOneError", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "findOne", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
 
 		type user struct {
 			ID    primitive.ObjectID
@@ -519,7 +568,10 @@ func Test_FindOneCommands(t *testing.T) {
 	})
 
 	mt.Run("FindOneInstrumentation", func(mt *mtest.T) {
-		mockInstr := setupMockInstrumenter(t, "findOne")
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "findOne", 1)
 		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateCursorResponse(1, "foo.bar", mtest.FirstBatch, bson.D{
@@ -536,13 +588,17 @@ func Test_FindOneCommands(t *testing.T) {
 func Test_UpdateByID(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("success", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "updateByID", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
+
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
 		resp, err := cl.UpdateByID(context.Background(), mt.Coll.Name(), "1", bson.M{"$set": bson.M{"name": "test"}})
@@ -552,7 +608,10 @@ func Test_UpdateByID(t *testing.T) {
 	})
 
 	mt.Run("instrumentation", func(mt *mtest.T) {
-		mockInstr := setupMockInstrumenter(t, "updateByID")
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "updateByID", 1)
 		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
@@ -564,13 +623,17 @@ func Test_UpdateByID(t *testing.T) {
 func Test_UpdateOne(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("success", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "updateOne", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
+
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
 		err := cl.UpdateOne(context.Background(), mt.Coll.Name(), bson.D{{Key: "name", Value: "test"}}, bson.M{"$set": bson.M{"name": "testing"}})
@@ -582,13 +645,17 @@ func Test_UpdateOne(t *testing.T) {
 func Test_UpdateMany(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("success", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "updateMany", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
+
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
 		_, err := cl.UpdateMany(context.Background(), mt.Coll.Name(), bson.D{{Key: "name", Value: "test"}},
@@ -601,13 +668,16 @@ func Test_UpdateMany(t *testing.T) {
 func Test_CountDocuments(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("countDocuments", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "countDocuments", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -661,7 +731,10 @@ func Test_DeleteOne(t *testing.T) {
 
 	for _, tc := range tests {
 		mt.Run(tc.name, func(mt *mtest.T) {
-			mockInstr := setupMockInstrumenter(t, tc.expectedOperation)
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOperation, 1)
 			cl := newMockClient(mt, mockInstr)
 
 			tc.mockResponse(mt)
@@ -704,7 +777,10 @@ func Test_DeleteMany(t *testing.T) {
 
 	for _, tc := range tests {
 		mt.Run(tc.name, func(mt *mtest.T) {
-			mockInstr := setupMockInstrumenter(t, "")
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockInstr := setupMockInstrumenter(t, ctrl, "", 1)
 			cl := newMockClient(mt, mockInstr)
 
 			tc.mockResponse(mt)
@@ -725,13 +801,17 @@ func Test_DeleteMany(t *testing.T) {
 func Test_Drop(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("Drop", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "drop", 1)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
+
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
 		err := cl.Drop(context.Background(), mt.Coll.Name())
@@ -740,7 +820,10 @@ func Test_Drop(t *testing.T) {
 	})
 
 	mt.Run("DropInstrumentation", func(mt *mtest.T) {
-		mockInstr := setupMockInstrumenter(t, "drop")
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		mockInstr := setupMockInstrumenter(t, ctrl, "drop", 1)
 		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
@@ -752,13 +835,17 @@ func Test_Drop(t *testing.T) {
 func TestClient_StartSession(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
 	mt.Run("StartSessionCommitTransactionSuccess", func(mt *mtest.T) {
-		cl.Database = mt.DB
+		ctrl := gomock.NewController(t)
+		defer ctrl.Finish()
+
+		// StartSession + InsertOne = 2 instrumentation calls
+		mockInstr := setupMockInstrumenter(t, ctrl, "", 2)
+		cl := Client{
+			Database:        mt.DB,
+			instrumentation: mockInstr,
+			config:          &Config{Host: "localhost", Database: "test"},
+		}
 
 		// Add mock responses if necessary
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
@@ -819,9 +906,14 @@ func Test_HealthCheck(t *testing.T) {
 
 	for _, tc := range tests {
 		mt.Run(tc.name, func(mt *mtest.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockInstr := setupMockInstrumenter(t, ctrl, "", 0)
 			cl := Client{
 				Database:        mt.DB,
-				instrumentation: observability.NewInstrumentation("mongo"),
+				instrumentation: mockInstr,
+				config:          &Config{Host: "localhost", Database: "test"},
 			}
 
 			tc.mockResponse(mt)
