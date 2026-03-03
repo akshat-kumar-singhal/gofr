@@ -2,10 +2,11 @@ package arangodb
 
 import (
 	"fmt"
-	"gofr.dev/pkg/gofr/datasource/observability"
 	"io"
 	"regexp"
 	"strings"
+
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 // QueryLog represents an ArangoDB query log entry for debugging and monitoring.

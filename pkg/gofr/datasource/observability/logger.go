@@ -1,4 +1,4 @@
-// Package common provides shared interfaces and utilities for GoFr datasources.
+// Package observability provides shared interfaces and utilities for GoFr datasources.
 // External datasources can import this lightweight module without depending on
 // the main gofr.dev module.
 package observability
