@@ -12,6 +12,8 @@ import (
 
 // tracerName returns the OpenTelemetry tracer name for a datasource.
 // Returns empty string if tracing is not applicable.
+//
+//nolint:gocyclo // complexity from datasource count, not logic
 func tracerName(ds any) string {
 	switch ds.(type) {
 	case container.Mongo:
@@ -49,6 +51,23 @@ func tracerName(ds any) string {
 	}
 }
 
+// instrumentLegacy sets up logging, metrics, and tracing using the legacy UseLogger/UseMetrics/UseTracer interface methods.
+func (a *App) instrumentLegacy(ds any, tracer trace.Tracer) {
+	if l, ok := ds.(interface{ UseLogger(any) }); ok {
+		l.UseLogger(a.Logger())
+	}
+
+	if m, ok := ds.(interface{ UseMetrics(any) }); ok {
+		m.UseMetrics(a.Metrics())
+	}
+
+	if tracer != nil {
+		if t, ok := ds.(interface{ UseTracer(any) }); ok {
+			t.UseTracer(tracer)
+		}
+	}
+}
+
 // instrumentDatasource sets up logging, metrics, and tracing for a datasource.
 // It determines the tracer name automatically based on the datasource type.
 // It checks for observability.Observable first, then falls back to legacy UseLogger/UseMetrics/UseTracer methods.
@@ -69,19 +88,7 @@ func (a *App) instrumentDatasource(ds any) {
 		}
 	} else {
 		// Fall back to legacy interface methods
-		if l, ok := ds.(interface{ UseLogger(any) }); ok {
-			l.UseLogger(a.Logger())
-		}
-
-		if m, ok := ds.(interface{ UseMetrics(any) }); ok {
-			m.UseMetrics(a.Metrics())
-		}
-
-		if tracer != nil {
-			if t, ok := ds.(interface{ UseTracer(any) }); ok {
-				t.UseTracer(tracer)
-			}
-		}
+		a.instrumentLegacy(ds, tracer)
 	}
 
 	// Connect if the datasource supports it
@@ -130,8 +137,9 @@ func (a *App) AddOracle(db container.OracleDB) {
 	a.container.Oracle = db
 }
 
-// UseMongo sets the Mongo datasource in the app's container.
 // Deprecated: Use the AddMongo method instead.
+//
+// UseMongo sets the Mongo datasource in the app's container.
 func (a *App) UseMongo(db container.Mongo) {
 	a.container.Mongo = db
 }
