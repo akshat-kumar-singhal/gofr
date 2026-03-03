@@ -11,7 +11,6 @@ import (
 
 // DefaultHistogramBuckets are the standard latency buckets for datasource stats histograms.
 // Values in seconds: 50ms to 10s, suitable for most database operations.
-var DefaultHistogramBuckets = []float64{.05, .075, .1, .125, .15, .2, .3, .5, .75, 1, 2, 3, 4, 5, 7.5, 10}
 
 const microsecondsPerSecond = 1e6
 
@@ -314,4 +313,8 @@ func (i *instrumentation) getTraceLabelsForDB(labels map[string]string) []attrib
 	}
 
 	return traceLabels
+}
+
+func GetDefaultHistogramBuckets() []float64 {
+	return []float64{.05, .075, .1, .125, .15, .2, .3, .5, .75, 1, 2, 3, 4, 5, 7.5, 10}
 }

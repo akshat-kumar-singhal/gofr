@@ -142,7 +142,7 @@ func (c *Client) Connect() {
 	}
 
 	// Register standard stats histogram (auto-derives name and description from datasource name)
-	c.instrumentation.RegisterStatsHistogram(observability.DefaultHistogramBuckets...)
+	c.instrumentation.RegisterStatsHistogram(observability.GetDefaultHistogramBuckets()...)
 
 	c.Database = m.Database(c.getDatabase())
 	c.uri = uri
