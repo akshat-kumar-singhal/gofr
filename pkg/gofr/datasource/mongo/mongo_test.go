@@ -40,7 +40,7 @@ func newMockClient(mt *mtest.T, instr observability.Instrumenter) *Client {
 // It accepts a gomock.Controller to use the same controller as the test.
 // count controls the expected number of instrumentation calls:
 // - count = 0: No instrumentation calls expected (validation fails before instrumentation)
-// - count = 1: Expects one AddTrace + one OperationStats call
+// - count = 1: Expects one AddTrace + one OperationStats call.
 func setupMockInstrumenter(t *testing.T, ctrl *gomock.Controller, expectedOperation string, count int) *observability.MockInstrumenter {
 	t.Helper()
 
@@ -243,12 +243,12 @@ func TestGetDBHost(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			host, err := getDBHost(tt.uri)
 
-			assert.Equal(t, tt.expected, host, "Test case: %s", tt.name)
+			assert.Equal(t, tt.expected, host)
 
 			if tt.expectedErr == "" {
-				assert.NoError(t, err, "Test case: %s", tt.name)
+				assert.NoError(t, err)
 			} else {
-				assert.EqualError(t, err, tt.expectedErr, "Test case: %s", tt.name)
+				assert.EqualError(t, err, tt.expectedErr)
 			}
 		})
 	}
@@ -366,11 +366,7 @@ func Test_CreateCollection(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "createCollection", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -388,11 +384,7 @@ func Test_FindMultipleCommands(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		var foundDocuments []any
 
@@ -419,11 +411,7 @@ func Test_FindMultipleCommands(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -437,11 +425,7 @@ func Test_FindMultipleCommands(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		var foundDocuments []any
 
@@ -471,11 +455,7 @@ func Test_FindOneCommands(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "findOne", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		type user struct {
 			ID    primitive.ObjectID
@@ -508,11 +488,7 @@ func Test_FindOneCommands(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "findOne", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		type user struct {
 			ID    primitive.ObjectID
@@ -538,11 +514,7 @@ func Test_UpdateByID(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "updateByID", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -561,11 +533,7 @@ func Test_UpdateOne(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "updateOne", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -583,11 +551,7 @@ func Test_UpdateMany(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "updateMany", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -606,11 +570,7 @@ func Test_CountDocuments(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "countDocuments", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -733,11 +693,7 @@ func Test_Drop(t *testing.T) {
 		defer ctrl.Finish()
 
 		mockInstr := setupMockInstrumenter(t, ctrl, "drop", 1)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
 
@@ -756,11 +712,7 @@ func TestClient_StartSession(t *testing.T) {
 
 		// StartSession + InsertOne = 2 instrumentation calls
 		mockInstr := setupMockInstrumenter(t, ctrl, "", 2)
-		cl := Client{
-			Database:        mt.DB,
-			instrumentation: mockInstr,
-			config:          &Config{Host: "localhost", Database: "test"},
-		}
+		cl := newMockClient(mt, mockInstr)
 
 		// Add mock responses if necessary
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
@@ -825,11 +777,7 @@ func Test_HealthCheck(t *testing.T) {
 			defer ctrl.Finish()
 
 			mockInstr := setupMockInstrumenter(t, ctrl, "", 0)
-			cl := Client{
-				Database:        mt.DB,
-				instrumentation: mockInstr,
-				config:          &Config{Host: "localhost", Database: "test"},
-			}
+			cl := newMockClient(mt, mockInstr)
 
 			tc.mockResponse(mt)
 

@@ -37,17 +37,8 @@ func TestClient_CreateUser(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
-
-			mockArango := mocks.NewMockClient(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 
 			tc.setupMocks(ctrl, mockArango)
 
@@ -84,17 +75,8 @@ func TestClient_DropUser(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
-
-			mockArango := mocks.NewMockClient(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 
 			tc.setupMocks(ctrl, mockArango)
 
@@ -157,18 +139,10 @@ func TestClient_GrantDB(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
 			mockUser := mocks.NewMockUser(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 
 			tc.setupMocks(ctrl, mockArango, mockUser)
 
@@ -222,18 +196,10 @@ func TestClient_GrantCollection(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
 			mockUser := mocks.NewMockUser(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 
 			tc.setupMocks(ctrl, mockArango, mockUser)
 
@@ -344,7 +310,7 @@ func TestClient_Database(t *testing.T) {
 				mockDB.EXPECT().Remove(gomock.Any()).Return(nil)
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(nil, nil)
 			},
-			validate: func(t *testing.T, db arangodb.Database, mockDB *mocks.MockDatabase) {
+			validate: func(t *testing.T, db arangodb.Database, _ *mocks.MockDatabase) {
 				t.Helper()
 				require.NotNil(t, db)
 				require.Equal(t, "testDB", db.Name())

@@ -22,29 +22,30 @@ var (
 	errDocumentNotFound = errors.New("document not found")
 )
 
-func setupDB(t *testing.T) (*Client, *mocks.MockClient, *mocks.MockUser) {
+// setupTestClient creates a test client with mock dependencies.
+// It returns the client, mock ArangoDB client, and the controller for setting up expectations.
+// The caller should defer ctrl.Finish() after calling this function.
+func setupTestClient(t *testing.T, expectedOp string) (*Client, *mocks.MockClient, *gomock.Controller) {
 	t.Helper()
 
 	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// Setup
 	mockArango := mocks.NewMockClient(ctrl)
-	mockUser := mocks.NewMockUser(ctrl)
+	mockInstr := setupMockInstrumenter(t, ctrl, expectedOp, 1)
 
-	config := Config{Host: "localhost", Port: 8527, User: "root", Password: "root"}
-	client := New(config)
+	client := &Client{
+		client:          mockArango,
+		instrumentation: mockInstr,
+		endpoint:        "http://localhost:8529",
+	}
 
-	client.client = mockArango
-
-	return client, mockArango, mockUser
+	return client, mockArango, ctrl
 }
 
 // setupMockInstrumenter creates a mock instrumenter with AddTrace and OperationStats expectations.
 // It accepts a gomock.Controller to use the same controller as the test.
 // count controls the expected number of instrumentation calls:
 // - count = 0: No instrumentation calls expected (validation fails before instrumentation)
-// - count = 1: Expects one AddTrace + one OperationStats call
+// - count = 1: Expects one AddTrace + one OperationStats call.
 func setupMockInstrumenter(t *testing.T, ctrl *gomock.Controller, expectedOperation string, count int) *observability.MockInstrumenter {
 	t.Helper()
 
@@ -257,6 +258,7 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
+//nolint:funlen // table-driven test with multiple test cases
 func TestClient_Query(t *testing.T) {
 	testCases := []struct {
 		name           string
@@ -280,9 +282,11 @@ func TestClient_Query(t *testing.T) {
 					{"_key": "doc1", "value": "test1"},
 					{"_key": "doc2", "value": "test2"},
 				}
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
 					Return(test.MockDB, nil)
-				test.MockDB.EXPECT().Query(gomock.Any(), "FOR doc IN collection RETURN doc", &arangodb.QueryOptions{BindVars: map[string]any{"key": "value"}}).
+				test.MockDB.EXPECT().Query(gomock.Any(), "FOR doc IN collection RETURN doc",
+					&arangodb.QueryOptions{BindVars: map[string]any{"key": "value"}}).
 					Return(NewMockQueryCursor(ctrl, expectedResult), nil)
 			},
 			expectedResult: []map[string]any{
@@ -308,6 +312,7 @@ func TestClient_Query(t *testing.T) {
 					{"_key": "doc1", "value": "v1"},
 					{"_key": "doc2", "value": "v2"},
 				}
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
 					Return(test.MockDB, nil)
 				test.MockDB.EXPECT().
@@ -316,6 +321,7 @@ func TestClient_Query(t *testing.T) {
 						require.NotNil(t, opts)
 						require.Equal(t, 50, opts.BatchSize)
 						require.True(t, opts.Options.FullCount)
+
 						return NewMockQueryCursor(ctrl, expectedResult), nil
 					})
 			},
@@ -340,6 +346,7 @@ func TestClient_Query(t *testing.T) {
 				expectedResult := []map[string]any{
 					{"_key": "doc1", "value": "v1"},
 				}
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
 					Return(test.MockDB, nil)
 				test.MockDB.EXPECT().
@@ -347,6 +354,7 @@ func TestClient_Query(t *testing.T) {
 					DoAndReturn(func(_ context.Context, _ string, opts *arangodb.QueryOptions) (arangodb.Cursor, error) {
 						require.NotNil(t, opts)
 						require.Equal(t, 5, opts.Options.MaxPlans)
+
 						return NewMockQueryCursor(ctrl, expectedResult), nil
 					})
 			},
@@ -400,14 +408,19 @@ func TestClient_Query(t *testing.T) {
 			// Handle InvalidResultType case separately
 			if tc.name == "InvalidResultType" {
 				var result int
+
 				err := client.Query(test.Ctx, tc.dbName, tc.query, tc.bindVars, &result)
 				require.Error(t, err)
 				require.Equal(t, tc.expectedError, err)
+
 				return
 			}
 
-			var result []map[string]any
-			var err error
+			var (
+				result []map[string]any
+				err    error
+			)
+
 			if len(tc.queryOpts) > 0 {
 				err = client.Query(test.Ctx, tc.dbName, tc.query, tc.bindVars, &result, tc.queryOpts...)
 			} else {

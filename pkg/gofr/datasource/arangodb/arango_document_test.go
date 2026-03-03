@@ -32,6 +32,7 @@ func TestClient_CreateDocument(t *testing.T) {
 			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().Properties(gomock.Any()).Return(arangodb.CollectionProperties{}, nil)
@@ -50,6 +51,7 @@ func TestClient_CreateDocument(t *testing.T) {
 			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().Properties(gomock.Any()).Return(arangodb.CollectionProperties{}, nil)
@@ -63,17 +65,9 @@ func TestClient_CreateDocument(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 			client.DB = &DB{client: client}
 			client.Document = &Document{client: client}
 
@@ -114,6 +108,7 @@ func TestClient_GetDocument(t *testing.T) {
 			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().ReadDocument(gomock.Any(), "testDocument", "").
@@ -131,6 +126,7 @@ func TestClient_GetDocument(t *testing.T) {
 			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().ReadDocument(gomock.Any(), "testDocument", "").
@@ -142,17 +138,9 @@ func TestClient_GetDocument(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 			client.DB = &DB{client: client}
 			client.Document = &Document{client: client}
 
@@ -192,6 +180,7 @@ func TestClient_UpdateDocument(t *testing.T) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
 				document := map[string]any{"field": "value"}
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().UpdateDocument(gomock.Any(), "testDocument", document).
@@ -211,6 +200,7 @@ func TestClient_UpdateDocument(t *testing.T) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
 				document := map[string]any{"field": "value"}
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().UpdateDocument(gomock.Any(), "testDocument", document).
@@ -222,17 +212,9 @@ func TestClient_UpdateDocument(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 			client.DB = &DB{client: client}
 			client.Document = &Document{client: client}
 
@@ -269,6 +251,7 @@ func TestClient_DeleteDocument(t *testing.T) {
 			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().DeleteDocument(gomock.Any(), "testDocument").
@@ -285,6 +268,7 @@ func TestClient_DeleteDocument(t *testing.T) {
 			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
 				mockDB := mocks.NewMockDatabase(ctrl)
 				mockCollection := mocks.NewMockCollection(ctrl)
+
 				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
 				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
 				mockCollection.EXPECT().DeleteDocument(gomock.Any(), "testDocument").
@@ -296,17 +280,9 @@ func TestClient_DeleteDocument(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
+			client, mockArango, ctrl := setupTestClient(t, tc.expectedOp)
 			defer ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
-
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
 			client.DB = &DB{client: client}
 			client.Document = &Document{client: client}
 

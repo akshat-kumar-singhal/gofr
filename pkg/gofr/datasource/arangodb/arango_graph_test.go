@@ -28,11 +28,18 @@ type TestGraph struct {
 // setupGraphTest creates a new test environment for graph tests.
 func setupGraphTest(t *testing.T) *TestGraph {
 	t.Helper()
+
+	return setupGraphTestWithInstr(t, "", 0)
+}
+
+// setupGraphTestWithInstr creates a new test environment for graph tests with custom instrumentation settings.
+func setupGraphTestWithInstr(t *testing.T, expectedOp string, count int) *TestGraph {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 
 	mockArango := mocks.NewMockClient(ctrl)
 	mockDB := mocks.NewMockDatabase(ctrl)
-	mockInstr := setupMockInstrumenter(t, ctrl, "", 0)
+	mockInstr := setupMockInstrumenter(t, ctrl, expectedOp, count)
 
 	client := &Client{
 		instrumentation: mockInstr,
@@ -40,7 +47,7 @@ func setupGraphTest(t *testing.T) *TestGraph {
 		endpoint:        "http://localhost:8529",
 	}
 
-	graph := &Graph{client: client}
+	client.Graph = &Graph{client: client}
 	ctx := context.Background()
 
 	return &TestGraph{
@@ -48,7 +55,7 @@ func setupGraphTest(t *testing.T) *TestGraph {
 		MockArango: mockArango,
 		MockDB:     mockDB,
 		Client:     client,
-		Graph:      graph,
+		Graph:      client.Graph,
 		Ctx:        ctx,
 		DBName:     "testDB",
 		GraphName:  "testGraph",
@@ -73,6 +80,7 @@ func TestGraph_CreateGraph(t *testing.T) {
 			setupMocks: func(test *TestGraph, ctrl *gomock.Controller) {
 				mockGraph := mocks.NewMockGraph(ctrl)
 				graphInterface := arangodb.Graph(mockGraph)
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(test.MockDB, nil)
 				test.MockDB.EXPECT().GraphExists(gomock.Any(), "testGraph").Return(false, nil)
 				test.MockDB.EXPECT().CreateGraph(gomock.Any(), "testGraph", gomock.Any(), nil).Return(graphInterface, nil)
@@ -101,6 +109,7 @@ func TestGraph_CreateGraph(t *testing.T) {
 					From:       []string{"fromColl"},
 					To:         []string{"toColl"},
 				}}}
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(test.MockDB, nil)
 				test.MockDB.EXPECT().GraphExists(gomock.Any(), "testGraph").Return(false, nil)
 				test.MockDB.EXPECT().CreateGraph(gomock.Any(), "testGraph", options, nil).Return(nil, errInvalidEdgeDocumentType)
@@ -111,35 +120,12 @@ func TestGraph_CreateGraph(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
+			test := setupGraphTestWithInstr(t, tc.expectedOp, 1)
+			defer test.Ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
-			mockDB := mocks.NewMockDatabase(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+			tc.setupMocks(test, test.Ctrl)
 
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
-			client.Graph = &Graph{client: client}
-
-			edgeDefs := &EdgeDefinition{{Collection: "edgeColl", From: []string{"fromColl"}, To: []string{"toColl"}}}
-
-			test := &TestGraph{
-				Ctrl:       ctrl,
-				MockArango: mockArango,
-				MockDB:     mockDB,
-				Client:     client,
-				Graph:      client.Graph,
-				Ctx:        context.Background(),
-				EdgeDefs:   edgeDefs,
-			}
-
-			tc.setupMocks(test, ctrl)
-
-			err := client.CreateGraph(test.Ctx, tc.dbName, tc.graphName, edgeDefs)
+			err := test.Client.CreateGraph(test.Ctx, tc.dbName, tc.graphName, test.EdgeDefs)
 
 			if tc.expectedError != nil {
 				require.Error(t, err)
@@ -168,6 +154,7 @@ func TestGraph_DropGraph(t *testing.T) {
 			setupMocks: func(test *TestGraph, ctrl *gomock.Controller) {
 				mockGraph := mocks.NewMockGraph(ctrl)
 				graphInterface := arangodb.Graph(mockGraph)
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(test.MockDB, nil)
 				test.MockDB.EXPECT().Graph(gomock.Any(), "testGraph", nil).Return(graphInterface, nil)
 				mockGraph.EXPECT().Remove(gomock.Any(), &arangodb.RemoveGraphOptions{DropCollections: true}).Return(nil)
@@ -192,6 +179,7 @@ func TestGraph_DropGraph(t *testing.T) {
 			setupMocks: func(test *TestGraph, ctrl *gomock.Controller) {
 				mockGraph := mocks.NewMockGraph(ctrl)
 				graphInterface := arangodb.Graph(mockGraph)
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(test.MockDB, nil)
 				test.MockDB.EXPECT().Graph(gomock.Any(), "testGraph", nil).Return(graphInterface, nil)
 				mockGraph.EXPECT().Remove(gomock.Any(), &arangodb.RemoveGraphOptions{DropCollections: true}).Return(errStatusDown)
@@ -202,32 +190,12 @@ func TestGraph_DropGraph(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
+			test := setupGraphTestWithInstr(t, tc.expectedOp, 1)
+			defer test.Ctrl.Finish()
 
-			mockArango := mocks.NewMockClient(ctrl)
-			mockDB := mocks.NewMockDatabase(ctrl)
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+			tc.setupMocks(test, test.Ctrl)
 
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
-			client.Graph = &Graph{client: client}
-
-			test := &TestGraph{
-				Ctrl:       ctrl,
-				MockArango: mockArango,
-				MockDB:     mockDB,
-				Client:     client,
-				Graph:      client.Graph,
-				Ctx:        context.Background(),
-			}
-
-			tc.setupMocks(test, ctrl)
-
-			err := client.DropGraph(test.Ctx, tc.dbName, tc.graphName)
+			err := test.Client.DropGraph(test.Ctx, tc.dbName, tc.graphName)
 
 			if tc.expectedError != nil {
 				require.Error(t, err)
@@ -242,7 +210,6 @@ func TestGraph_DropGraph(t *testing.T) {
 func TestClient_GetEdges(t *testing.T) {
 	testCases := []struct {
 		name           string
-		expectedOp     string
 		dbName         string
 		graphName      string
 		edgeCollection string
@@ -254,7 +221,6 @@ func TestClient_GetEdges(t *testing.T) {
 	}{
 		{
 			name:           "Success",
-			expectedOp:     "getEdges",
 			dbName:         "testDB",
 			graphName:      "testGraph",
 			edgeCollection: "edgeColl",
@@ -265,6 +231,7 @@ func TestClient_GetEdges(t *testing.T) {
 					From:  "fromColl",
 					Label: "label",
 				}}
+
 				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(test.MockDB, nil)
 				test.MockDB.EXPECT().GetEdges(gomock.Any(), "edgeColl", "vertexID", nil).Return(expectedEdges, nil)
 			},
@@ -277,7 +244,6 @@ func TestClient_GetEdges(t *testing.T) {
 		},
 		{
 			name:           "Error_DBNotFound",
-			expectedOp:     "getEdges",
 			dbName:         "testDB",
 			graphName:      "testGraph",
 			edgeCollection: "edgeColl",
@@ -289,7 +255,6 @@ func TestClient_GetEdges(t *testing.T) {
 		},
 		{
 			name:           "Error_InvalidInput",
-			expectedOp:     "getEdges",
 			dbName:         "testDB",
 			graphName:      "testGraph",
 			edgeCollection: "",
@@ -300,7 +265,6 @@ func TestClient_GetEdges(t *testing.T) {
 		},
 		{
 			name:           "Error_InvalidResponseType",
-			expectedOp:     "getEdges",
 			dbName:         "testDB",
 			graphName:      "testGraph",
 			edgeCollection: "edgeColl",
@@ -313,48 +277,30 @@ func TestClient_GetEdges(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			defer ctrl.Finish()
-
-			mockArango := mocks.NewMockClient(ctrl)
-			mockDB := mocks.NewMockDatabase(ctrl)
-
-			var count int
+			count := 1
 			if tc.skipInstr {
 				count = 0
-			} else {
-				count = 1
 			}
 
-			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, count)
+			test := setupGraphTestWithInstr(t, "getEdges", count)
+			defer test.Ctrl.Finish()
 
-			client := &Client{
-				client:          mockArango,
-				instrumentation: mockInstr,
-				endpoint:        "http://localhost:8529",
-			}
-
-			test := &TestGraph{
-				Ctrl:       ctrl,
-				MockArango: mockArango,
-				MockDB:     mockDB,
-				Client:     client,
-				Ctx:        context.Background(),
-			}
-
-			tc.setupMocks(test, ctrl)
+			tc.setupMocks(test, test.Ctrl)
 
 			// Special handling for InvalidResponseType test
 			if tc.name == "Error_InvalidResponseType" {
 				var resp string
-				err := client.GetEdges(test.Ctx, tc.dbName, tc.graphName, tc.edgeCollection, tc.vertexID, &resp)
+
+				err := test.Client.GetEdges(test.Ctx, tc.dbName, tc.graphName, tc.edgeCollection, tc.vertexID, &resp)
 				require.Error(t, err)
 				require.ErrorIs(t, err, tc.expectedError)
+
 				return
 			}
 
 			var resp EdgeDetails
-			err := client.GetEdges(test.Ctx, tc.dbName, tc.graphName, tc.edgeCollection, tc.vertexID, &resp)
+
+			err := test.Client.GetEdges(test.Ctx, tc.dbName, tc.graphName, tc.edgeCollection, tc.vertexID, &resp)
 
 			if tc.expectedError != nil {
 				require.Error(t, err)
