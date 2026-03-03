@@ -12,21 +12,94 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/integration/mtest"
-	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/mock/gomock"
 
 	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
-func Test_NewMongoClient(t *testing.T) {
+// duplicateKeyError returns a mock write error response for duplicate key errors.
+func duplicateKeyError() bson.D {
+	return mtest.CreateWriteErrorsResponse(mtest.WriteError{
+		Index:   1,
+		Code:    11000,
+		Message: "duplicate key error",
+	})
+}
+
+// newMockClient creates a Client with the given mtest.T database and instrumenter.
+func newMockClient(mt *mtest.T, instr observability.Instrumenter) *Client {
+	return &Client{
+		Database:        mt.DB,
+		instrumentation: instr,
+		config:          &Config{Host: "localhost", Database: "test"},
+	}
+}
+
+// setupMockInstrumenter creates a mock instrumenter with AddTrace and OperationStats expectations.
+// If expectedOperation is non-empty, AddTrace will assert the operation matches.
+func setupMockInstrumenter(t *testing.T, expectedOperation string) *observability.MockInstrumenter {
+	t.Helper()
+
 	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	mockInstr := observability.NewMockInstrumenter(ctrl)
 
-	client := New(Config{Database: "test", Host: "localhost", Port: 27017, User: "admin", ConnectionTimeout: 1 * time.Second})
-	client.Database = &mongo.Database{}
-	client.Connect()
+	mockInstr.EXPECT().
+		AddTrace(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, q observability.ObservableQuery) (context.Context, trace.Span) {
+			if expectedOperation != "" {
+				assert.Equal(t, expectedOperation, q.GetOperation())
+			}
 
-	assert.NotNil(t, client)
+			return ctx, nil
+		})
+
+	mockInstr.EXPECT().
+		OperationStats(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(1)
+
+	return mockInstr
+}
+
+func Test_NewMongoClient(t *testing.T) {
+	tests := []struct {
+		name           string
+		config         Config
+		setupClient    func(*Client)
+		expectDatabase bool
+	}{
+		{
+			name:   "success",
+			config: Config{Database: "test", Host: "localhost", Port: 27017, User: "admin", ConnectionTimeout: 1 * time.Second},
+			setupClient: func(c *Client) {
+				c.Database = &mongo.Database{}
+			},
+			expectDatabase: true,
+		},
+		{
+			name:           "error_invalid_config",
+			config:         Config{Host: "mongo", Database: "test"},
+			setupClient:    nil,
+			expectDatabase: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			client := New(tc.config)
+			if tc.setupClient != nil {
+				tc.setupClient(client)
+			}
+
+			client.Connect()
+
+			if tc.expectDatabase {
+				assert.NotNil(t, client)
+			} else {
+				assert.Nil(t, client.Database)
+			}
+		})
+	}
 }
 
 func TestGenerateMongoURI(t *testing.T) {
@@ -179,96 +252,117 @@ func TestGetDBHost(t *testing.T) {
 	}
 }
 
-func Test_NewMongoClientError(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	// TODO Add test for error log
-
-	client := New(Config{Host: "mongo", Database: "test"})
-	client.Connect()
-
-	assert.Nil(t, client.Database)
-}
-
-func Test_InsertCommands(t *testing.T) {
-	// Create a connected client using the mock database
+func Test_InsertOne(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	tests := []struct {
+		name              string
+		mockResponse      func(mt *mtest.T)
+		expectError       bool
+		expectNilRes      bool
+		expectedOperation string
+	}{
+		{
+			name:         "success",
+			mockResponse: func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:  false,
+			expectNilRes: false,
+		},
+		{
+			name:         "error",
+			mockResponse: func(mt *mtest.T) { mt.AddMockResponses(duplicateKeyError()) },
+			expectError:  true,
+			expectNilRes: true,
+		},
+		{
+			name:              "instrumentation",
+			mockResponse:      func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:       false,
+			expectNilRes:      false,
+			expectedOperation: "insertOne",
+		},
+	}
 
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
+	for _, tc := range tests {
+		mt.Run(tc.name, func(mt *mtest.T) {
+			mockInstr := setupMockInstrumenter(t, tc.expectedOperation)
+			cl := newMockClient(mt, mockInstr)
 
-	// TODO Add test for number of times the logger/metrics is invoked
+			tc.mockResponse(mt)
 
-	mt.Run("insertOneSuccess", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
+			doc := map[string]any{"name": "Aryan"}
+			resp, err := cl.InsertOne(context.Background(), mt.Coll.Name(), doc)
 
-		doc := map[string]any{"name": "Aryan"}
+			if tc.expectNilRes {
+				assert.Nil(t, resp)
+			} else {
+				assert.NotNil(t, resp)
+			}
 
-		resp, err := cl.InsertOne(context.Background(), mt.Coll.Name(), doc)
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
 
-		assert.NotNil(t, resp)
-		assert.NoError(t, err)
-	})
+func Test_InsertMany(t *testing.T) {
+	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	mt.Run("insertOneError", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateWriteErrorsResponse(mtest.WriteError{
-			Index:   1,
-			Code:    11000,
-			Message: "duplicate key error",
-		}))
+	tests := []struct {
+		name         string
+		mockResponse func(mt *mtest.T)
+		expectError  bool
+		expectNilRes bool
+	}{
+		{
+			name:         "success",
+			mockResponse: func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:  false,
+			expectNilRes: false,
+		},
+		{
+			name:         "error",
+			mockResponse: func(mt *mtest.T) { mt.AddMockResponses(duplicateKeyError()) },
+			expectError:  true,
+			expectNilRes: true,
+		},
+	}
 
-		doc := map[string]any{"name": "Aryan"}
+	for _, tc := range tests {
+		mt.Run(tc.name, func(mt *mtest.T) {
+			mockInstr := setupMockInstrumenter(t, "")
+			cl := newMockClient(mt, mockInstr)
 
-		resp, err := cl.InsertOne(context.Background(), mt.Coll.Name(), doc)
+			tc.mockResponse(mt)
 
-		assert.Nil(t, resp)
-		assert.Error(t, err)
-	})
+			doc := map[string]any{"name": "Aryan"}
+			resp, err := cl.InsertMany(context.Background(), mt.Coll.Name(), []any{doc, doc})
 
-	mt.Run("insertManySuccess", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
+			if tc.expectNilRes {
+				assert.Nil(t, resp)
+			} else {
+				assert.NotNil(t, resp)
+			}
 
-		doc := map[string]any{"name": "Aryan"}
-
-		resp, err := cl.InsertMany(context.Background(), mt.Coll.Name(), []any{doc, doc})
-
-		assert.NotNil(t, resp)
-		require.NoError(t, err)
-	})
-
-	mt.Run("insertManyError", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateWriteErrorsResponse(mtest.WriteError{
-			Index:   1,
-			Code:    11000,
-			Message: "duplicate key error",
-		}))
-
-		doc := map[string]any{"name": "Aryan"}
-
-		resp, err := cl.InsertMany(context.Background(), mt.Coll.Name(), []any{doc, doc})
-
-		assert.Nil(t, resp)
-		require.Error(t, err)
-	})
+			if tc.expectError {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func Test_CreateCollection(t *testing.T) {
-	// Create a connected client using the mock database
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("createCollection", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -278,17 +372,24 @@ func Test_CreateCollection(t *testing.T) {
 
 		require.NoError(t, err)
 	})
+
+	mt.Run("createCollectionInstrumentation", func(mt *mtest.T) {
+		mockInstr := setupMockInstrumenter(t, "createCollection")
+		cl := newMockClient(mt, mockInstr)
+
+		mt.AddMockResponses(mtest.CreateSuccessResponse())
+
+		_ = cl.CreateCollection(context.Background(), "newCollection")
+	})
 }
 
 func Test_FindMultipleCommands(t *testing.T) {
-	// Create a connected client using the mock database
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("FindSuccess", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -343,18 +444,32 @@ func Test_FindMultipleCommands(t *testing.T) {
 
 		require.ErrorContains(t, err, "cursor.nextBatch should be an array but is a BSON invalid")
 	})
+
+	mt.Run("FindInstrumentation", func(mt *mtest.T) {
+		mockInstr := setupMockInstrumenter(t, "find")
+		cl := newMockClient(mt, mockInstr)
+
+		id1 := primitive.NewObjectID()
+		first := mtest.CreateCursorResponse(1, "foo.bar", mtest.FirstBatch, bson.D{
+			{Key: "_id", Value: id1},
+			{Key: "name", Value: "john"},
+		})
+		killCursors := mtest.CreateCursorResponse(0, "foo.bar", mtest.NextBatch)
+		mt.AddMockResponses(first, killCursors)
+
+		var results []any
+
+		_ = cl.Find(context.Background(), mt.Coll.Name(), bson.D{{}}, &results)
+	})
 }
 
 func Test_FindOneCommands(t *testing.T) {
-	// Create a connected client using the mock database
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("FindOneSuccess", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -402,10 +517,23 @@ func Test_FindOneCommands(t *testing.T) {
 
 		assert.Error(t, err)
 	})
+
+	mt.Run("FindOneInstrumentation", func(mt *mtest.T) {
+		mockInstr := setupMockInstrumenter(t, "findOne")
+		cl := newMockClient(mt, mockInstr)
+
+		mt.AddMockResponses(mtest.CreateCursorResponse(1, "foo.bar", mtest.FirstBatch, bson.D{
+			{Key: "_id", Value: primitive.NewObjectID()},
+			{Key: "name", Value: "john"},
+		}))
+
+		var result map[string]any
+
+		_ = cl.FindOne(context.Background(), mt.Coll.Name(), bson.D{{}}, &result)
+	})
 }
 
-func Test_UpdateCommands(t *testing.T) {
-	// Create a connected client using the mock database
+func Test_UpdateByID(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
 	ctrl := gomock.NewController(t)
@@ -413,14 +541,9 @@ func Test_UpdateCommands(t *testing.T) {
 
 	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
-
-	// TODO Add test for counting the metrics/logger invocation count
-
-	mt.Run("updateByID", func(mt *mtest.T) {
+	mt.Run("success", func(mt *mtest.T) {
 		cl.Database = mt.DB
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
-		// Create a document to insert
 
 		resp, err := cl.UpdateByID(context.Background(), mt.Coll.Name(), "1", bson.M{"$set": bson.M{"name": "test"}})
 
@@ -428,20 +551,45 @@ func Test_UpdateCommands(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	mt.Run("updateOne", func(mt *mtest.T) {
+	mt.Run("instrumentation", func(mt *mtest.T) {
+		mockInstr := setupMockInstrumenter(t, "updateByID")
+		cl := newMockClient(mt, mockInstr)
+
+		mt.AddMockResponses(mtest.CreateSuccessResponse())
+
+		_, _ = cl.UpdateByID(context.Background(), mt.Coll.Name(), "1", bson.M{"$set": bson.M{"name": "test"}})
+	})
+}
+
+func Test_UpdateOne(t *testing.T) {
+	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
+
+	mt.Run("success", func(mt *mtest.T) {
 		cl.Database = mt.DB
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
-		// Create a document to insert
 
 		err := cl.UpdateOne(context.Background(), mt.Coll.Name(), bson.D{{Key: "name", Value: "test"}}, bson.M{"$set": bson.M{"name": "testing"}})
 
 		assert.NoError(t, err)
 	})
+}
 
-	mt.Run("updateMany", func(mt *mtest.T) {
+func Test_UpdateMany(t *testing.T) {
+	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
+
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
+
+	mt.Run("success", func(mt *mtest.T) {
 		cl.Database = mt.DB
 		mt.AddMockResponses(mtest.CreateSuccessResponse())
-		// Create a document to insert
 
 		_, err := cl.UpdateMany(context.Background(), mt.Coll.Name(), bson.D{{Key: "name", Value: "test"}},
 			bson.M{"$set": bson.M{"name": "testing"}})
@@ -457,8 +605,6 @@ func Test_CountDocuments(t *testing.T) {
 	defer ctrl.Finish()
 
 	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("countDocuments", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -482,78 +628,107 @@ func Test_CountDocuments(t *testing.T) {
 	})
 }
 
-func Test_DeleteCommands(t *testing.T) {
-	// Create a connected client using the mock database
+func Test_DeleteOne(t *testing.T) {
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	tests := []struct {
+		name              string
+		mockResponse      func(mt *mtest.T)
+		expectError       bool
+		expectedCount     int64
+		expectedOperation string
+	}{
+		{
+			name:          "success",
+			mockResponse:  func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:   false,
+			expectedCount: 0,
+		},
+		{
+			name:          "error",
+			mockResponse:  func(mt *mtest.T) { mt.AddMockResponses(duplicateKeyError()) },
+			expectError:   true,
+			expectedCount: 0,
+		},
+		{
+			name:              "instrumentation",
+			mockResponse:      func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:       false,
+			expectedCount:     0,
+			expectedOperation: "deleteOne",
+		},
+	}
 
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
+	for _, tc := range tests {
+		mt.Run(tc.name, func(mt *mtest.T) {
+			mockInstr := setupMockInstrumenter(t, tc.expectedOperation)
+			cl := newMockClient(mt, mockInstr)
 
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
+			tc.mockResponse(mt)
 
-	// TODO Add test for counting the metrics/logger invocation count
+			resp, err := cl.DeleteOne(context.Background(), mt.Coll.Name(), bson.D{{}})
 
-	mt.Run("DeleteOne", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
+			assert.Equal(t, tc.expectedCount, resp)
 
-		resp, err := cl.DeleteOne(context.Background(), mt.Coll.Name(), bson.D{{}})
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
 
-		assert.Equal(t, int64(0), resp)
-		assert.NoError(t, err)
-	})
+func Test_DeleteMany(t *testing.T) {
+	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	mt.Run("DeleteOneError", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateWriteErrorsResponse(mtest.WriteError{
-			Index:   1,
-			Code:    11000,
-			Message: "duplicate key error",
-		}))
+	tests := []struct {
+		name          string
+		mockResponse  func(mt *mtest.T)
+		expectError   bool
+		expectedCount int64
+	}{
+		{
+			name:          "success",
+			mockResponse:  func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:   false,
+			expectedCount: 0,
+		},
+		{
+			name:          "error",
+			mockResponse:  func(mt *mtest.T) { mt.AddMockResponses(duplicateKeyError()) },
+			expectError:   true,
+			expectedCount: 0,
+		},
+	}
 
-		resp, err := cl.DeleteOne(context.Background(), mt.Coll.Name(), bson.D{{}})
+	for _, tc := range tests {
+		mt.Run(tc.name, func(mt *mtest.T) {
+			mockInstr := setupMockInstrumenter(t, "")
+			cl := newMockClient(mt, mockInstr)
 
-		assert.Equal(t, int64(0), resp)
-		assert.Error(t, err)
-	})
+			tc.mockResponse(mt)
 
-	mt.Run("DeleteMany", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
+			resp, err := cl.DeleteMany(context.Background(), mt.Coll.Name(), bson.D{{}})
 
-		resp, err := cl.DeleteMany(context.Background(), mt.Coll.Name(), bson.D{{}})
+			assert.Equal(t, tc.expectedCount, resp)
 
-		assert.Equal(t, int64(0), resp)
-		assert.NoError(t, err)
-	})
-
-	mt.Run("DeleteManyError", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateWriteErrorsResponse(mtest.WriteError{
-			Index:   1,
-			Code:    11000,
-			Message: "duplicate key error",
-		}))
-
-		resp, err := cl.DeleteMany(context.Background(), mt.Coll.Name(), bson.D{{}})
-
-		assert.Equal(t, int64(0), resp)
-		assert.Error(t, err)
-	})
+			if tc.expectError {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
 }
 
 func Test_Drop(t *testing.T) {
-	// Create a connected client using the mock database
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("Drop", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -563,20 +738,24 @@ func Test_Drop(t *testing.T) {
 
 		assert.NoError(t, err)
 	})
+
+	mt.Run("DropInstrumentation", func(mt *mtest.T) {
+		mockInstr := setupMockInstrumenter(t, "drop")
+		cl := newMockClient(mt, mockInstr)
+
+		mt.AddMockResponses(mtest.CreateSuccessResponse())
+
+		_ = cl.Drop(context.Background(), mt.Coll.Name())
+	})
 }
 
 func TestClient_StartSession(t *testing.T) {
-	// Create a connected client using the mock database
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
-
-	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
-
-	// TODO Add test for counting the metrics/logger invocation count
 
 	mt.Run("StartSessionCommitTransactionSuccess", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -616,36 +795,46 @@ func TestClient_StartSession(t *testing.T) {
 }
 
 func Test_HealthCheck(t *testing.T) {
-	// Create a connected client using the mock database
 	mt := mtest.New(t, mtest.NewOptions().ClientType(mtest.Mock))
 
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	tests := []struct {
+		name           string
+		mockResponse   func(mt *mtest.T)
+		expectedStatus string
+		expectedErr    error
+	}{
+		{
+			name:           "success",
+			mockResponse:   func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectedStatus: "UP",
+			expectedErr:    nil,
+		},
+		{
+			name:           "error",
+			mockResponse:   func(mt *mtest.T) { mt.AddMockResponses(duplicateKeyError()) },
+			expectedStatus: "DOWN",
+			expectedErr:    errStatusDown,
+		},
+	}
 
-	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
+	for _, tc := range tests {
+		mt.Run(tc.name, func(mt *mtest.T) {
+			cl := Client{
+				Database:        mt.DB,
+				instrumentation: observability.NewInstrumentation("mongo"),
+			}
 
-	mt.Run("HealthCheck Success", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
+			tc.mockResponse(mt)
 
-		resp, err := cl.HealthCheck(context.Background())
+			resp, err := cl.HealthCheck(context.Background())
 
-		require.NoError(t, err)
-		assert.Contains(t, fmt.Sprint(resp), "UP")
-	})
+			if tc.expectedErr != nil {
+				require.ErrorIs(t, err, tc.expectedErr)
+			} else {
+				require.NoError(t, err)
+			}
 
-	mt.Run("HealthCheck Error", func(mt *mtest.T) {
-		cl.Database = mt.DB
-		mt.AddMockResponses(mtest.CreateWriteErrorsResponse(mtest.WriteError{
-			Index:   1,
-			Code:    11000,
-			Message: "duplicate key error",
-		}))
-
-		resp, err := cl.HealthCheck(context.Background())
-
-		require.ErrorIs(t, err, errStatusDown)
-
-		assert.Contains(t, fmt.Sprint(resp), "DOWN")
-	})
+			assert.Contains(t, fmt.Sprint(resp), tc.expectedStatus)
+		})
+	}
 }
