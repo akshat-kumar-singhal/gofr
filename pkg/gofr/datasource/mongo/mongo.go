@@ -13,19 +13,18 @@ import (
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 	"go.mongodb.org/mongo-driver/mongo/readpref"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 type Client struct {
 	*mongo.Database
 
-	uri      string
-	database string
-	logger   Logger
-	metrics  Metrics
-	config   *Config
-	tracer   trace.Tracer
+	uri             string
+	database        string
+	instrumentation observability.Instrumenter
+	config          *Config
 }
 
 type Config struct {
@@ -58,33 +57,57 @@ i.e. by default observability features gets initialized when used with GoFr.
 // The Connect method must be called to establish a connection to MongoDB.
 // Usage:
 // client := New(config)
-// client.UseLogger(loggerInstance)
-// client.UseMetrics(metricsInstance)
+// client.SetLogger(loggerInstance)
+// client.SetMetrics(metricsInstance)
 // client.Connect().
 //
 //nolint:gocritic // Configs do not need to be passed by reference
 func New(c Config) *Client {
-	return &Client{config: &c}
+	return &Client{
+		instrumentation: observability.NewInstrumentation("mongo"),
+		config:          &c,
+	}
+}
+
+// SetLogger sets the logger for the MongoDB client.
+func (c *Client) SetLogger(l observability.Logger) {
+	c.instrumentation.SetLogger(l)
+}
+
+// SetMetrics sets the metrics for the MongoDB client.
+func (c *Client) SetMetrics(m observability.Metrics) {
+	c.instrumentation.SetMetrics(m)
+}
+
+// SetTracer sets the tracer for the MongoDB client.
+func (c *Client) SetTracer(t trace.Tracer) {
+	c.instrumentation.SetTracer(t)
 }
 
 // UseLogger sets the logger for the MongoDB client which asserts the Logger interface.
+//
+// Deprecated: Use SetLogger instead.
 func (c *Client) UseLogger(logger any) {
-	if l, ok := logger.(Logger); ok {
-		c.logger = l
+	if l, ok := logger.(observability.Logger); ok {
+		c.SetLogger(l)
 	}
 }
 
 // UseMetrics sets the metrics for the MongoDB client which asserts the Metrics interface.
+//
+// Deprecated: Use SetMetrics instead.
 func (c *Client) UseMetrics(metrics any) {
-	if m, ok := metrics.(Metrics); ok {
-		c.metrics = m
+	if m, ok := metrics.(observability.Metrics); ok {
+		c.SetMetrics(m)
 	}
 }
 
 // UseTracer sets the tracer for the MongoDB client.
+//
+// Deprecated: Use SetTracer instead.
 func (c *Client) UseTracer(tracer any) {
-	if tracer, ok := tracer.(trace.Tracer); ok {
-		c.tracer = tracer
+	if t, ok := tracer.(trace.Tracer); ok {
+		c.SetTracer(t)
 	}
 }
 
@@ -92,11 +115,11 @@ func (c *Client) UseTracer(tracer any) {
 func (c *Client) Connect() {
 	uri, host, err := generateMongoURI(c.config)
 	if err != nil {
-		c.logger.Errorf("error generating MongoDB URI: %v", err)
+		c.instrumentation.Errorf("error generating MongoDB URI: %v", err)
 		return
 	}
 
-	c.logger.Debugf("connecting to MongoDB at %v to database %v", c.config.Host, c.config.Database)
+	c.instrumentation.Debugf("connecting to MongoDB at %v to database %v", c.config.Host, c.config.Database)
 
 	timeout := c.config.ConnectionTimeout
 	if timeout == 0 {
@@ -108,22 +131,24 @@ func (c *Client) Connect() {
 
 	m, err := mongo.Connect(ctx, options.Client().ApplyURI(uri))
 	if err != nil {
-		c.logger.Errorf("error while connecting to MongoDB, err:%v", err)
+		c.instrumentation.Errorf("error while connecting to MongoDB, err:%v", err)
 
 		return
 	}
 
 	if err = m.Ping(ctx, nil); err != nil {
-		c.logger.Errorf("could not connect to MongoDB at %v due to err: %v", host, err)
+		c.instrumentation.Errorf("could not connect to MongoDB at %v due to err: %v", host, err)
 		return
 	}
 
-	mongoBuckets := []float64{.05, .075, .1, .125, .15, .2, .3, .5, .75, 1, 2, 3, 4, 5, 7.5, 10}
-	c.metrics.NewHistogram("app_mongo_stats", "Response time of MongoDB queries in milliseconds.", mongoBuckets...)
+	// Register standard stats histogram (auto-derives name and description from datasource name)
+	c.instrumentation.RegisterStatsHistogram(observability.DefaultHistogramBuckets...)
 
 	c.Database = m.Database(c.config.Database)
+	c.uri = uri
+	c.database = c.config.Database
 
-	c.logger.Logf("connected to MongoDB at %v to database %v", host, c.config.Database)
+	c.instrumentation.Logf("connected to MongoDB at %v to database %v", host, c.config.Database)
 }
 
 func generateMongoURI(config *Config) (uri, host string, err error) {
@@ -181,34 +206,49 @@ func getDBHost(uri string) (host string, err error) {
 
 // InsertOne inserts a single document into the specified collection.
 func (c *Client) InsertOne(ctx context.Context, collection string, document any) (any, error) {
-	tracerCtx, span := c.addTrace(ctx, "insertOne", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "insertOne", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "insertOne", Collection: collection, Filter: document},
+		time.Now(), "insert", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	result, err := c.Database.Collection(collection).InsertOne(tracerCtx, document)
-
-	defer c.sendOperationStats(&QueryLog{Query: "insertOne", Collection: collection, Filter: document}, time.Now(),
-		"insert", span)
 
 	return result, err
 }
 
 // InsertMany inserts multiple documents into the specified collection.
 func (c *Client) InsertMany(ctx context.Context, collection string, documents []any) ([]any, error) {
-	tracerCtx, span := c.addTrace(ctx, "insertMany", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "insertMany", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "insertMany", Collection: collection, Filter: documents},
+		time.Now(), "insertMany", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	res, err := c.Database.Collection(collection).InsertMany(tracerCtx, documents)
 	if err != nil {
 		return nil, err
 	}
 
-	defer c.sendOperationStats(&QueryLog{Query: "insertMany", Collection: collection, Filter: documents}, time.Now(),
-		"insertMany", span)
-
 	return res.InsertedIDs, nil
 }
 
 // Find retrieves documents from the specified collection based on the provided filter and binds response to result.
 func (c *Client) Find(ctx context.Context, collection string, filter, results any) error {
-	tracerCtx, span := c.addTrace(ctx, "find", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "find", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "find", Collection: collection, Filter: filter},
+		time.Now(), "find", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	cur, err := c.Database.Collection(collection).Find(tracerCtx, filter)
 	if err != nil {
@@ -221,143 +261,160 @@ func (c *Client) Find(ctx context.Context, collection string, filter, results an
 		return err
 	}
 
-	defer c.sendOperationStats(&QueryLog{Query: "find", Collection: collection, Filter: filter}, time.Now(), "find",
-		span)
-
 	return nil
 }
 
 // FindOne retrieves a single document from the specified collection based on the provided filter and binds response to result.
 func (c *Client) FindOne(ctx context.Context, collection string, filter, result any) error {
-	tracerCtx, span := c.addTrace(ctx, "findOne", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "findOne", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "findOne", Collection: collection, Filter: filter},
+		time.Now(), "findOne", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	b, err := c.Database.Collection(collection).FindOne(tracerCtx, filter).Raw()
 	if err != nil {
 		return err
 	}
 
-	defer c.sendOperationStats(&QueryLog{Query: "findOne", Collection: collection, Filter: filter}, time.Now(),
-		"findOne", span)
-
 	return bson.Unmarshal(b, result)
 }
 
 // UpdateByID updates a document in the specified collection by its ID.
 func (c *Client) UpdateByID(ctx context.Context, collection string, id, update any) (int64, error) {
-	tracerCtx, span := c.addTrace(ctx, "updateByID", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "updateByID", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "updateByID", Collection: collection, ID: id, Update: update},
+		time.Now(), "updateByID", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	res, err := c.Database.Collection(collection).UpdateByID(tracerCtx, id, update)
-
-	defer c.sendOperationStats(&QueryLog{Query: "updateByID", Collection: collection, ID: id, Update: update}, time.Now(),
-		"updateByID", span)
 
 	return res.ModifiedCount, err
 }
 
 // UpdateOne updates a single document in the specified collection based on the provided filter.
 func (c *Client) UpdateOne(ctx context.Context, collection string, filter, update any) error {
-	tracerCtx, span := c.addTrace(ctx, "updateOne", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "updateOne", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "updateOne", Collection: collection, Filter: filter, Update: update},
+		time.Now(), "updateOne", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	_, err := c.Database.Collection(collection).UpdateOne(tracerCtx, filter, update)
-
-	defer c.sendOperationStats(&QueryLog{Query: "updateOne", Collection: collection, Filter: filter, Update: update},
-		time.Now(), "updateOne", span)
 
 	return err
 }
 
 // UpdateMany updates multiple documents in the specified collection based on the provided filter.
 func (c *Client) UpdateMany(ctx context.Context, collection string, filter, update any) (int64, error) {
-	tracerCtx, span := c.addTrace(ctx, "updateMany", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "updateMany", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "updateMany", Collection: collection, Filter: filter, Update: update},
+		time.Now(), "updateMany", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	res, err := c.Database.Collection(collection).UpdateMany(tracerCtx, filter, update)
-
-	defer c.sendOperationStats(&QueryLog{Query: "updateMany", Collection: collection, Filter: filter, Update: update}, time.Now(),
-		"updateMany", span)
 
 	return res.ModifiedCount, err
 }
 
 // CountDocuments counts the number of documents in the specified collection based on the provided filter.
 func (c *Client) CountDocuments(ctx context.Context, collection string, filter any) (int64, error) {
-	tracerCtx, span := c.addTrace(ctx, "countDocuments", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "countDocuments", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "countDocuments", Collection: collection, Filter: filter},
+		time.Now(), "countDocuments", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	result, err := c.Database.Collection(collection).CountDocuments(tracerCtx, filter)
-
-	defer c.sendOperationStats(&QueryLog{Query: "countDocuments", Collection: collection, Filter: filter}, time.Now(),
-		"countDocuments", span)
 
 	return result, err
 }
 
 // DeleteOne deletes a single document from the specified collection based on the provided filter.
 func (c *Client) DeleteOne(ctx context.Context, collection string, filter any) (int64, error) {
-	tracerCtx, span := c.addTrace(ctx, "deleteOne", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "deleteOne", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "deleteOne", Collection: collection, Filter: filter},
+		time.Now(), "deleteOne", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	res, err := c.Database.Collection(collection).DeleteOne(tracerCtx, filter)
 	if err != nil {
 		return 0, err
 	}
 
-	defer c.sendOperationStats(&QueryLog{Query: "deleteOne", Collection: collection, Filter: filter}, time.Now(),
-		"deleteOne", span)
-
 	return res.DeletedCount, nil
 }
 
 // DeleteMany deletes multiple documents from the specified collection based on the provided filter.
 func (c *Client) DeleteMany(ctx context.Context, collection string, filter any) (int64, error) {
-	tracerCtx, span := c.addTrace(ctx, "deleteMany", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "deleteMany", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "deleteMany", Collection: collection, Filter: filter},
+		time.Now(), "deleteMany", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	res, err := c.Database.Collection(collection).DeleteMany(tracerCtx, filter)
 	if err != nil {
 		return 0, err
 	}
 
-	defer c.sendOperationStats(&QueryLog{Query: "deleteMany", Collection: collection, Filter: filter}, time.Now(),
-		"deleteMany", span)
-
 	return res.DeletedCount, nil
 }
 
 // Drop drops the specified collection from the database.
 func (c *Client) Drop(ctx context.Context, collection string) error {
-	tracerCtx, span := c.addTrace(ctx, "drop", collection)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "drop", map[string]string{
+		"collection": collection,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "drop", Collection: collection},
+		time.Now(), "drop", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: collection})
 
 	err := c.Database.Collection(collection).Drop(tracerCtx)
-
-	defer c.sendOperationStats(&QueryLog{Query: "drop", Collection: collection}, time.Now(), "drop", span)
 
 	return err
 }
 
 // CreateCollection creates the specified collection in the database.
 func (c *Client) CreateCollection(ctx context.Context, name string) error {
-	tracerCtx, span := c.addTrace(ctx, "createCollection", name)
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "createCollection", map[string]string{
+		"collection": name,
+	})
+
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Query: "createCollection", Collection: name},
+		time.Now(), "createCollection", span,
+		observability.OperationLabels{Host: c.uri, Database: c.database, Table: name})
 
 	err := c.Database.CreateCollection(tracerCtx, name)
 
-	defer c.sendOperationStats(&QueryLog{Query: "createCollection", Collection: name}, time.Now(), "createCollection",
-		span)
-
 	return err
-}
-
-func (c *Client) sendOperationStats(ql *QueryLog, startTime time.Time, method string, span trace.Span) {
-	duration := time.Since(startTime).Microseconds()
-
-	ql.Duration = duration
-
-	c.logger.Debug(ql)
-
-	c.metrics.RecordHistogram(context.Background(), "app_mongo_stats", float64(duration), "hostname", c.uri,
-		"database", c.database, "type", ql.Query)
-
-	if span != nil {
-		defer span.End()
-
-		span.SetAttributes(attribute.Int64(fmt.Sprintf("mongo.%v.duration", method), duration))
-	}
 }
 
 type Health struct {
@@ -387,7 +444,10 @@ func (c *Client) HealthCheck(ctx context.Context) (any, error) {
 }
 
 func (c *Client) StartSession() (any, error) {
-	defer c.sendOperationStats(&QueryLog{Query: "startSession"}, time.Now(), "", nil)
+	defer c.instrumentation.OperationStats(context.Background(),
+		&QueryLog{Query: "startSession"},
+		time.Now(), "startSession", nil,
+		observability.OperationLabels{Host: c.uri, Database: c.database})
 
 	s, err := c.Client().StartSession()
 	ses := &session{s}
@@ -408,18 +468,4 @@ type Transaction interface {
 	AbortTransaction(context.Context) error
 	CommitTransaction(context.Context) error
 	EndSession(context.Context)
-}
-
-func (c *Client) addTrace(ctx context.Context, method, collection string) (context.Context, trace.Span) {
-	if c.tracer != nil {
-		contextWithTrace, span := c.tracer.Start(ctx, fmt.Sprintf("mongodb-%v", method))
-
-		span.SetAttributes(
-			attribute.String("mongo.collection", collection),
-		)
-
-		return contextWithTrace, span
-	}
-
-	return ctx, nil
 }

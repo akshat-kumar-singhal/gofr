@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
+
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 var (
@@ -137,18 +139,18 @@ func (d *Document) isEdgeCollection(ctx context.Context, dbName, collectionName 
 
 func executeCollectionOperation(ctx context.Context, d Document, dbName, collectionName,
 	operation string, documentID string) (arangodb.Collection, context.Context, error) {
-	tracerCtx, span := d.client.addTrace(ctx, operation, map[string]string{"collection": collectionName})
-	startTime := time.Now()
+	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, operation, map[string]string{
+		"collection": collectionName,
+	})
 
-	ql := &QueryLog{Operation: operation,
-		Database:   dbName,
-		Collection: collectionName}
-
+	ql := &QueryLog{Operation: operation, Database: dbName, Collection: collectionName}
 	if documentID != "" {
 		ql.ID = documentID
 	}
 
-	defer d.client.sendOperationStats(ql, startTime, operation, span)
+	defer d.client.instrumentation.OperationStats(ctx, ql,
+		time.Now(), operation, span,
+		observability.OperationLabels{Host: d.client.endpoint, Table: collectionName})
 
 	collection, err := d.client.getCollection(tracerCtx, dbName, collectionName)
 	if err != nil {

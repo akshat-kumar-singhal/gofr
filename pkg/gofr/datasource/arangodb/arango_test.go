@@ -8,7 +8,6 @@ import (
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/arangodb/go-driver/v2/arangodb/shared"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.uber.org/mock/gomock"
 )
 
@@ -18,45 +17,30 @@ var (
 	errDocumentNotFound = errors.New("document not found")
 )
 
-func setupDB(t *testing.T) (*Client, *MockClient, *MockUser, *MockLogger, *MockMetrics) {
+func setupDB(t *testing.T) (*Client, *MockClient, *MockUser) {
 	t.Helper()
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	// Setup
-	mockLogger := NewMockLogger(ctrl)
-	mockMetrics := NewMockMetrics(ctrl)
 	mockArango := NewMockClient(ctrl)
 	mockUser := NewMockUser(ctrl)
 
-	mockLogger.EXPECT().Debugf(gomock.Any(), gomock.Any()).AnyTimes()
-
 	config := Config{Host: "localhost", Port: 8527, User: "root", Password: "root"}
 	client := New(config)
-	client.UseLogger(mockLogger)
-	client.UseMetrics(mockMetrics)
-	client.UseTracer(otel.GetTracerProvider().Tracer("gofr-arangodb"))
 
 	client.client = mockArango
 
-	return client, mockArango, mockUser, mockLogger, mockMetrics
+	return client, mockArango, mockUser
 }
 
 func Test_NewArangoClient_Error(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
-
-	logger.EXPECT().Errorf("failed to verify connection: %v", gomock.Any())
-	logger.EXPECT().Debugf(gomock.Any(), gomock.Any())
-
 	client := New(Config{Host: "localhost", Port: 8529, Password: "root", User: "admin"})
 
-	client.UseLogger(logger)
-	client.UseMetrics(metrics)
 	client.Connect()
 
 	require.NotNil(t, client)

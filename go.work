@@ -20,6 +20,7 @@ use (
 	./pkg/gofr/datasource/kv-store/dynamodb
 	./pkg/gofr/datasource/kv-store/nats
 	./pkg/gofr/datasource/mongo
+	./pkg/gofr/datasource/observability
 	./pkg/gofr/datasource/opentsdb
 	./pkg/gofr/datasource/oracle
 	./pkg/gofr/datasource/pubsub/eventhub

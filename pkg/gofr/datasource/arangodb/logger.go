@@ -7,13 +7,7 @@ import (
 	"strings"
 )
 
-type Logger interface {
-	Debug(args ...any)
-	Debugf(pattern string, args ...any)
-	Logf(pattern string, args ...any)
-	Errorf(pattern string, args ...any)
-}
-
+// QueryLog represents an ArangoDB query log entry for debugging and monitoring.
 type QueryLog struct {
 	Query      string `json:"query"`
 	Duration   int64  `json:"duration"`
@@ -22,6 +16,15 @@ type QueryLog struct {
 	Filter     any    `json:"filter,omitempty"`
 	ID         any    `json:"id,omitempty"`
 	Operation  string `json:"operation,omitempty"`
+}
+
+// SetDuration sets the duration field (implements observability.QueryLogger).
+func (ql *QueryLog) SetDuration(d int64) {
+	ql.Duration = d
+}
+
+func (ql *QueryLog) GetOperation() string {
+	return ql.Operation
 }
 
 // PrettyPrint formats the QueryLog for output.
@@ -35,8 +38,7 @@ func (ql *QueryLog) PrettyPrint(writer io.Writer) {
 	}
 
 	fmt.Fprintf(writer, "\u001B[38;5;8m%-32s \u001B[38;5;206m%-6s\u001B[0m %8d\u001B[38;5;8mµs\u001B[0m %s %s\n",
-		clean(ql.Operation), "ARANGODB", ql.Duration,
-		clean(strings.Join([]string{ql.Database, ql.Collection, fmt.Sprint(ql.Filter), fmt.Sprint(ql.ID)}, " ")), clean(ql.Query))
+		clean(ql.Operation), "ARANGODB", ql.Duration, ql.Meta(), clean(ql.Query))
 }
 
 func clean(query string) string {
@@ -44,4 +46,18 @@ func clean(query string) string {
 	query = regexp.MustCompile(`\s+`).ReplaceAllString(query, " ")
 	// Trim leading and trailing whitespace from the string
 	return strings.TrimSpace(query)
+}
+
+func (ql *QueryLog) Meta() string {
+	list := []string{ql.Database, ql.Collection}
+
+	if ql.Filter != nil {
+		list = append(list, fmt.Sprintf("%v", ql.Filter))
+	}
+
+	if ql.ID != nil {
+		list = append(list, fmt.Sprintf("%v", ql.ID))
+	}
+
+	return strings.Join(list, " ")
 }

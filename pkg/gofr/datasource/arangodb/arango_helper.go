@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
+
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 func (c *Client) user(ctx context.Context, username string) (arangodb.User, error) {
@@ -18,11 +20,14 @@ func (c *Client) database(ctx context.Context, name string) (arangodb.Database, 
 
 // createUser creates a new user in ArangoDB.
 func (c *Client) createUser(ctx context.Context, username string, options any) error {
-	tracerCtx, span := c.addTrace(ctx, "createUser", map[string]string{"user": username})
-	startTime := time.Now()
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "createUser", map[string]string{
+		"user": username,
+	})
 
-	defer c.sendOperationStats(&QueryLog{Operation: "createUser", ID: username},
-		startTime, "createUser", span)
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Operation: "createUser", ID: username},
+		time.Now(), "createUser", span,
+		observability.OperationLabels{Host: c.endpoint})
 
 	userOptions, ok := options.(UserOptions)
 	if !ok {
@@ -39,11 +44,14 @@ func (c *Client) createUser(ctx context.Context, username string, options any) e
 
 // dropUser deletes a user from ArangoDB.
 func (c *Client) dropUser(ctx context.Context, username string) error {
-	tracerCtx, span := c.addTrace(ctx, "dropUser", map[string]string{"user": username})
-	startTime := time.Now()
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "dropUser", map[string]string{
+		"user": username,
+	})
 
-	defer c.sendOperationStats(&QueryLog{Operation: "dropUser",
-		ID: username}, startTime, "dropUser", span)
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Operation: "dropUser", ID: username},
+		time.Now(), "dropUser", span,
+		observability.OperationLabels{Host: c.endpoint})
 
 	err := c.client.RemoveUser(tracerCtx, username)
 	if err != nil {
@@ -55,11 +63,14 @@ func (c *Client) dropUser(ctx context.Context, username string) error {
 
 // grantDB grants permissions for a database to a user.
 func (c *Client) grantDB(ctx context.Context, database, username, permission string) error {
-	tracerCtx, span := c.addTrace(ctx, "grantDB", map[string]string{"DB": database})
-	startTime := time.Now()
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "grantDB", map[string]string{
+		"DB": database,
+	})
 
-	defer c.sendOperationStats(&QueryLog{Operation: "grantDB",
-		Database: database, ID: username}, startTime, "grantDB", span)
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Operation: "grantDB", Database: database, ID: username},
+		time.Now(), "grantDB", span,
+		observability.OperationLabels{Host: c.endpoint})
 
 	user, err := c.client.User(tracerCtx, username)
 	if err != nil {
@@ -73,12 +84,14 @@ func (c *Client) grantDB(ctx context.Context, database, username, permission str
 
 // grantCollection grants permissions for a collection to a user.
 func (c *Client) grantCollection(ctx context.Context, database, collection, username, permission string) error {
-	tracerCtx, span := c.addTrace(ctx, "GrantCollection", map[string]string{"collection": collection})
-	startTime := time.Now()
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "GrantCollection", map[string]string{
+		"collection": collection,
+	})
 
-	defer c.sendOperationStats(&QueryLog{Operation: "GrantCollection",
-		Database: database, Collection: collection, ID: username}, startTime,
-		"GrantCollection", span)
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Operation: "GrantCollection", Database: database, Collection: collection, ID: username},
+		time.Now(), "GrantCollection", span,
+		observability.OperationLabels{Host: c.endpoint, Table: collection})
 
 	user, err := c.client.User(tracerCtx, username)
 	if err != nil {

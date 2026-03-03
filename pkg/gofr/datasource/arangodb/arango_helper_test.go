@@ -6,18 +6,13 @@ import (
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/stretchr/testify/require"
-	"go.opentelemetry.io/otel"
 	"go.uber.org/mock/gomock"
 )
 
 func Test_Client_CreateUser(t *testing.T) {
-	client, mockArango, _, mockLogger, mockMetrics := setupDB(t)
+	client, mockArango, _ := setupDB(t)
 
 	mockArango.EXPECT().CreateUser(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
-
-	mockLogger.EXPECT().Debug(gomock.Any())
-	mockMetrics.EXPECT().RecordHistogram(context.Background(), "app_arango_stats",
-		gomock.Any(), "endpoint", gomock.Any(), gomock.Any(), gomock.Any())
 
 	err := client.createUser(context.Background(), "test", UserOptions{
 		Password: "user123",
@@ -27,30 +22,21 @@ func Test_Client_CreateUser(t *testing.T) {
 }
 
 func Test_Client_DropUser(t *testing.T) {
-	client, mockArango, _, mockLogger, mockMetrics := setupDB(t)
+	client, mockArango, _ := setupDB(t)
 
 	mockArango.EXPECT().RemoveUser(gomock.Any(), gomock.Any()).Return(nil)
-	mockLogger.EXPECT().Debug(gomock.Any())
-	mockMetrics.EXPECT().RecordHistogram(context.Background(), "app_arango_stats", gomock.Any(),
-		gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any())
 
 	err := client.dropUser(context.Background(), "test")
 	require.NoError(t, err, "Test_Arango_DropUser: failed to drop user")
 }
 
 func Test_Client_GrantDB(t *testing.T) {
-	client, mockArango, mockUser, mockLogger, mockMetrics := setupDB(t)
+	client, mockArango, mockUser := setupDB(t)
 
 	// Test data
 	ctx := context.Background()
 	dbName := "testDB"
 	username := "testUser"
-
-	// Expectations
-	mockLogger.EXPECT().Debug(gomock.Any()).AnyTimes()
-	mockMetrics.EXPECT().RecordHistogram(
-		ctx, "app_arango_stats", gomock.Any(), "endpoint",
-		gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 
 	// Expect user() call and return our mock user that implements the full interface
 	mockArango.EXPECT().User(gomock.Any(), username).Return(mockUser, nil).MaxTimes(2)
@@ -92,7 +78,7 @@ func Test_Client_GrantDB(t *testing.T) {
 }
 
 func Test_Client_GrantDB_Errors(t *testing.T) {
-	client, mockArango, _, mockLogger, mockMetrics := setupDB(t)
+	client, mockArango, _ := setupDB(t)
 
 	ctx := context.Background()
 	dbName := "testDB"
@@ -100,9 +86,6 @@ func Test_Client_GrantDB_Errors(t *testing.T) {
 
 	// Expect user() call to return error
 	mockArango.EXPECT().User(gomock.Any(), username).Return(nil, errUserNotFound)
-	mockLogger.EXPECT().Debug(gomock.Any()).AnyTimes()
-	mockMetrics.EXPECT().RecordHistogram(ctx, "app_arango_stats", gomock.Any(), "endpoint",
-		gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
 
 	err := client.grantDB(ctx, dbName, username, string(arangodb.GrantReadWrite))
 	require.Error(t, err)
@@ -144,15 +127,10 @@ func TestClient_Database(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockLogger := NewMockLogger(ctrl)
-	mockMetrics := NewMockMetrics(ctrl)
 	mockArango := NewMockClient(ctrl)
 
 	config := Config{Host: "localhost", Port: 8527, User: "root", Password: "root"}
 	client := New(config)
-	client.UseLogger(mockLogger)
-	client.UseMetrics(mockMetrics)
-	client.UseTracer(otel.GetTracerProvider().Tracer("gofr-arangodb"))
 
 	client.client = mockArango
 
@@ -207,12 +185,7 @@ func TestClient_Database(t *testing.T) {
 }
 
 func Test_Client_GrantCollection(t *testing.T) {
-	client, mockArango, mockUser, mockLogger, mockMetrics := setupDB(t)
-
-	mockLogger.EXPECT().Debug(gomock.Any())
-	mockMetrics.EXPECT().RecordHistogram(
-		context.Background(), "app_arango_stats", gomock.Any(), "endpoint",
-		gomock.Any(), gomock.Any(), gomock.Any())
+	client, mockArango, mockUser := setupDB(t)
 
 	mockArango.EXPECT().User(gomock.Any(), "testUser").Return(mockUser, nil)
 
@@ -223,12 +196,7 @@ func Test_Client_GrantCollection(t *testing.T) {
 }
 
 func Test_Client_GrantCollection_Error(t *testing.T) {
-	client, mockArango, _, mockLogger, mockMetrics := setupDB(t)
-
-	mockLogger.EXPECT().Debug(gomock.Any()).AnyTimes()
-	mockMetrics.EXPECT().RecordHistogram(
-		context.Background(), "app_arango_stats", gomock.Any(), "endpoint",
-		gomock.Any(), gomock.Any(), gomock.Any()).AnyTimes()
+	client, mockArango, _ := setupDB(t)
 
 	mockArango.EXPECT().User(gomock.Any(), "testUser").Return(nil, errUserNotFound)
 

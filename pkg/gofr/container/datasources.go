@@ -187,6 +187,8 @@ type CassandraBatchWithContext interface {
 	ExecuteBatchCASWithCtx(ctx context.Context, name string, dest ...any) (bool, error)
 }
 
+// Deprecated: Use CassandraWithContext interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type CassandraProvider interface {
 	CassandraWithContext
 
@@ -201,6 +203,8 @@ type Clickhouse interface {
 	HealthChecker
 }
 
+// Deprecated: Use Clickhouse interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type ClickhouseProvider interface {
 	Clickhouse
 
@@ -222,6 +226,8 @@ type OracleTx interface {
 	Rollback() error
 }
 
+// Deprecated: Use OracleDB interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type OracleProvider interface {
 	OracleDB
 
@@ -290,6 +296,8 @@ type Transaction interface {
 	EndSession(context.Context)
 }
 
+// Deprecated: Use Mongo interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // MongoProvider is an interface that extends Mongo with additional methods for logging, metrics, and connection management.
 // Which is used for initializing datasource.
 type MongoProvider interface {
@@ -335,6 +343,8 @@ type SurrealDB interface {
 	HealthChecker
 }
 
+// Deprecated: Use SurrealDB interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // SurrealBDProvider is an interface that extends SurrealDB with additional methods for logging, metrics, or connection management.
 // It is typically used for initializing and managing SurrealDB-based data sources.
 type SurrealBDProvider interface {
@@ -343,17 +353,19 @@ type SurrealBDProvider interface {
 	provider
 }
 
+// Deprecated: Use datasource.Observable interface with SetLogger/SetMetrics/SetTracer instead.
+// This interface will be removed in a future version.
 type provider interface {
-	// UseLogger sets the logger for the Cassandra client.
+	// Deprecated: Use SetLogger from datasource.Observable instead.
 	UseLogger(logger any)
 
-	// UseMetrics sets the metrics for the Cassandra client.
+	// Deprecated: Use SetMetrics from datasource.Observable instead.
 	UseMetrics(metrics any)
 
-	// UseTracer sets the tracer for the Cassandra client.
+	// Deprecated: Use SetTracer from datasource.Observable instead.
 	UseTracer(tracer any)
 
-	// Connect establishes a connection to Cassandra and registers metrics using the provided configuration when the client was Created.
+	// Connect establishes a connection using the provided configuration.
 	Connect()
 }
 
@@ -371,12 +383,16 @@ type KVStore interface {
 	HealthChecker
 }
 
+// Deprecated: Use KVStore interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type KVStoreProvider interface {
 	KVStore
 
 	provider
 }
 
+// Deprecated: Use pubsub.Client interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type PubSubProvider interface {
 	pubsub.Client
 
@@ -398,6 +414,8 @@ type Solr interface {
 	HealthChecker
 }
 
+// Deprecated: Use Solr interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type SolrProvider interface {
 	Solr
 
@@ -484,12 +502,16 @@ type Dgraph interface {
 	HealthChecker
 }
 
+// Deprecated: Use Dgraph interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // DgraphProvider extends Dgraph with connection management capabilities.
 type DgraphProvider interface {
 	Dgraph
 	provider
 }
 
+// Deprecated: Use OpenTSDB interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type OpenTSDBProvider interface {
 	OpenTSDB
 	provider
@@ -629,6 +651,8 @@ type ScyllaDB interface {
 	HealthChecker
 }
 
+// Deprecated: Use ScyllaDB interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 type ScyllaDBProvider interface {
 	ScyllaDB
 	provider
@@ -697,6 +721,8 @@ type ArangoDB interface {
 	HealthChecker
 }
 
+// Deprecated: Use ArangoDB interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // ArangoDBProvider is an interface that extends ArangoDB with additional methods for logging, metrics, and connection management.
 type ArangoDBProvider interface {
 	ArangoDB
@@ -737,6 +763,8 @@ type Elasticsearch interface {
 	HealthChecker
 }
 
+// Deprecated: Use Elasticsearch interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // ElasticsearchProvider an interface that extends Elasticsearch with additional methods for logging, metrics, and connection management.
 type ElasticsearchProvider interface {
 	Elasticsearch
@@ -777,6 +805,8 @@ type Couchbase interface {
 	HealthChecker
 }
 
+// Deprecated: Use Couchbase interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // CouchbaseProvider is an interface that extends Couchbase with additional methods
 // for logging, metrics, tracing, and connection management, aligning with other
 // data source providers in your package.
@@ -786,6 +816,8 @@ type CouchbaseProvider interface {
 	provider
 }
 
+// Deprecated: Use DBResolver interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // DBResolverProvider defines an interface for SQL read/write splitting providers.
 type DBResolverProvider interface {
 	GetResolver() DB
@@ -831,6 +863,8 @@ type InfluxDB interface {
 	HealthChecker
 }
 
+// Deprecated: Use InfluxDB interface with datasource.Observable instead.
+// This interface will be removed in a future version.
 // InfluxDBProvider an interface that extends InfluxDB with additional methods for logging, metrics, and connection management.
 type InfluxDBProvider interface {
 	InfluxDB

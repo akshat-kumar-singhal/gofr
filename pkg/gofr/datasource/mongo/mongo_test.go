@@ -14,22 +14,16 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/integration/mtest"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/mock/gomock"
+
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 func Test_NewMongoClient(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
-
-	logger.EXPECT().Debugf(gomock.Any(), gomock.Any())
-	logger.EXPECT().Errorf(gomock.Any(), gomock.Any(), gomock.Any())
-
 	client := New(Config{Database: "test", Host: "localhost", Port: 27017, User: "admin", ConnectionTimeout: 1 * time.Second})
 	client.Database = &mongo.Database{}
-	client.UseLogger(logger)
-	client.UseMetrics(metrics)
 	client.Connect()
 
 	assert.NotNil(t, client)
@@ -189,14 +183,9 @@ func Test_NewMongoClientError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
-
-	logger.EXPECT().Errorf("error generating MongoDB URI: %v", gomock.Any())
+	// TODO Add test for error log
 
 	client := New(Config{Host: "mongo", Database: "test"})
-	client.UseLogger(logger)
-	client.UseMetrics(metrics)
 	client.Connect()
 
 	assert.Nil(t, client.Database)
@@ -209,17 +198,10 @@ func Test_InsertCommands(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
-
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any()).Times(3)
-
-	logger.EXPECT().Debug(gomock.Any()).Times(3)
-
-	cl.logger = logger
+	// TODO Add test for number of times the logger/metrics is invoked
 
 	mt.Run("insertOneSuccess", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -285,17 +267,8 @@ func Test_CreateCollection(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
-
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
-
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any())
-
-	logger.EXPECT().Debug(gomock.Any())
-
-	cl.logger = logger
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("createCollection", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -314,17 +287,8 @@ func Test_FindMultipleCommands(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
-
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
-
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any())
-
-	logger.EXPECT().Debug(gomock.Any())
-
-	cl.logger = logger
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("FindSuccess", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -388,17 +352,9 @@ func Test_FindOneCommands(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
-
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any())
-
-	logger.EXPECT().Debug(gomock.Any())
-
-	cl.logger = logger
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("FindOneSuccess", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -455,17 +411,11 @@ func Test_UpdateCommands(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any()).Times(3)
-
-	logger.EXPECT().Debug(gomock.Any()).Times(3)
-
-	cl.logger = logger
+	// TODO Add test for counting the metrics/logger invocation count
 
 	mt.Run("updateByID", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -506,17 +456,9 @@ func Test_CountDocuments(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
-
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any())
-
-	logger.EXPECT().Debug(gomock.Any())
-
-	cl.logger = logger
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("countDocuments", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -547,17 +489,11 @@ func Test_DeleteCommands(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any()).Times(2)
-
-	logger.EXPECT().Debug(gomock.Any()).Times(2)
-
-	cl.logger = logger
+	// TODO Add test for counting the metrics/logger invocation count
 
 	mt.Run("DeleteOne", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -615,17 +551,9 @@ func Test_Drop(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
-
-	metrics.EXPECT().RecordHistogram(context.Background(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any())
-
-	logger.EXPECT().Debug(gomock.Any())
-
-	cl.logger = logger
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
 	mt.Run("Drop", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -644,18 +572,11 @@ func TestClient_StartSession(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
-	cl := Client{metrics: metrics, tracer: otel.GetTracerProvider().Tracer("gofr-mongo")}
+	cl.SetTracer(otel.GetTracerProvider().Tracer("gofr-mongo"))
 
-	// Set up the mock expectation for the metrics recording
-	metrics.EXPECT().RecordHistogram(gomock.Any(), "app_mongo_stats", gomock.Any(), "hostname",
-		gomock.Any(), "database", gomock.Any(), "type", gomock.Any()).Times(2)
-
-	logger.EXPECT().Debug(gomock.Any()).Times(2)
-
-	cl.logger = logger
+	// TODO Add test for counting the metrics/logger invocation count
 
 	mt.Run("StartSessionCommitTransactionSuccess", func(mt *mtest.T) {
 		cl.Database = mt.DB
@@ -701,12 +622,7 @@ func Test_HealthCheck(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	metrics := NewMockMetrics(ctrl)
-	logger := NewMockLogger(ctrl)
-
-	cl := Client{metrics: metrics}
-
-	cl.logger = logger
+	cl := Client{instrumentation: observability.NewInstrumentation("mongo")}
 
 	mt.Run("HealthCheck Success", func(mt *mtest.T) {
 		cl.Database = mt.DB

@@ -10,8 +10,9 @@ import (
 	"github.com/arangodb/go-driver/v2/arangodb"
 	arangoShared "github.com/arangodb/go-driver/v2/arangodb/shared"
 	"github.com/arangodb/go-driver/v2/connection"
-	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 const (
@@ -21,12 +22,10 @@ const (
 
 // Client represents an ArangoDB client.
 type Client struct {
-	client   arangodb.Client
-	logger   Logger
-	metrics  Metrics
-	tracer   trace.Tracer
-	config   *Config
-	endpoint string
+	client          arangodb.Client
+	instrumentation observability.Instrumenter
+	config          *Config
+	endpoint        string
 	*DB
 	*Document
 	*Graph
@@ -61,7 +60,8 @@ var (
 // New creates a new ArangoDB client with the provided configuration.
 func New(c Config) *Client {
 	client := &Client{
-		config: &c,
+		instrumentation: observability.NewInstrumentation("arango"),
+		config:          &c,
 	}
 
 	client.DB = &DB{client: client}
@@ -71,36 +71,57 @@ func New(c Config) *Client {
 	return client
 }
 
+// SetLogger sets the logger for the ArangoDB client.
+func (c *Client) SetLogger(l observability.Logger) {
+	c.instrumentation.SetLogger(l)
+}
+
+// SetMetrics sets the metrics for the ArangoDB client.
+func (c *Client) SetMetrics(m observability.Metrics) {
+	c.instrumentation.SetMetrics(m)
+}
+
+// SetTracer sets the tracer for the ArangoDB client.
+func (c *Client) SetTracer(t trace.Tracer) {
+	c.instrumentation.SetTracer(t)
+}
+
 // UseLogger sets the logger for the ArangoDB client.
+//
+// Deprecated: Use SetLogger instead.
 func (c *Client) UseLogger(logger any) {
-	if l, ok := logger.(Logger); ok {
-		c.logger = l
+	if l, ok := logger.(observability.Logger); ok {
+		c.SetLogger(l)
 	}
 }
 
 // UseMetrics sets the metrics for the ArangoDB client.
+//
+// Deprecated: Use SetMetrics instead.
 func (c *Client) UseMetrics(metrics any) {
-	if m, ok := metrics.(Metrics); ok {
-		c.metrics = m
+	if m, ok := metrics.(observability.Metrics); ok {
+		c.SetMetrics(m)
 	}
 }
 
 // UseTracer sets the tracer for the ArangoDB client.
+//
+// Deprecated: Use SetTracer instead.
 func (c *Client) UseTracer(tracer any) {
 	if t, ok := tracer.(trace.Tracer); ok {
-		c.tracer = t
+		c.SetTracer(t)
 	}
 }
 
 // Connect establishes a connection to the ArangoDB server.
 func (c *Client) Connect() {
 	if err := c.validateConfig(); err != nil {
-		c.logger.Errorf("config validation error: %v", err)
+		c.instrumentation.Errorf("config validation error: %v", err)
 		return
 	}
 
 	c.endpoint = fmt.Sprintf("http://%s:%d", c.config.Host, c.config.Port)
-	c.logger.Debugf("connecting to ArangoDB at %s", c.endpoint)
+	c.instrumentation.Debugf("connecting to ArangoDB at %s", c.endpoint)
 
 	// Use HTTP connection instead of HTTP2
 	endpoint := connection.NewRoundRobinEndpoints([]string{c.endpoint})
@@ -109,7 +130,7 @@ func (c *Client) Connect() {
 	// Set authentication
 	auth := connection.NewBasicAuth(c.config.User, c.config.Password)
 	if err := conn.SetAuthentication(auth); err != nil {
-		c.logger.Errorf("authentication setup failed: %v", err)
+		c.instrumentation.Errorf("authentication setup failed: %v", err)
 		return
 	}
 
@@ -123,15 +144,14 @@ func (c *Client) Connect() {
 
 	_, err := c.client.Version(ctx)
 	if err != nil {
-		c.logger.Errorf("failed to verify connection: %v", err)
+		c.instrumentation.Errorf("failed to verify connection: %v", err)
 		return
 	}
 
-	// Initialize metrics
-	arangoBuckets := []float64{.05, .075, .1, .125, .15, .2, .3, .5, .75, 1, 2, 3, 4, 5, 7.5, 10}
-	c.metrics.NewHistogram("app_arango_stats", "Response time of ArangoDB operations in milliseconds.", arangoBuckets...)
+	// Register standard stats histogram (auto-derives name and description from datasource name)
+	c.instrumentation.RegisterStatsHistogram(observability.DefaultHistogramBuckets...)
 
-	c.logger.Logf("Connected to ArangoDB successfully at %s", c.endpoint)
+	c.instrumentation.Logf("Connected to ArangoDB successfully at %s", c.endpoint)
 }
 
 func (c *Client) validateConfig() error {
@@ -233,11 +253,14 @@ func (c *Client) validateConfig() error {
 //	    fmt.Printf("User: %+v\n", doc)
 //	}
 func (c *Client) Query(ctx context.Context, dbName, query string, bindVars map[string]any, result any, options ...map[string]any) error {
-	tracerCtx, span := c.addTrace(ctx, "query", map[string]string{"DB": dbName})
-	startTime := time.Now()
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, "query", map[string]string{
+		"DB": dbName,
+	})
 
-	defer c.sendOperationStats(&QueryLog{Operation: "query",
-		Database: dbName, Query: query}, startTime, "query", span)
+	defer c.instrumentation.OperationStats(ctx,
+		&QueryLog{Operation: "query", Database: dbName, Query: query},
+		time.Now(), "query", span,
+		observability.OperationLabels{Host: c.endpoint})
 
 	db, err := c.client.GetDatabase(tracerCtx, dbName, nil)
 	if err != nil {
@@ -305,43 +328,6 @@ func bindQueryOptions(queryOptions *arangodb.QueryOptions, options []map[string]
 	}
 
 	return nil
-}
-
-// addTrace adds tracing to context if tracer is configured.
-func (c *Client) addTrace(ctx context.Context, operation string, attributes map[string]string) (context.Context, trace.Span) {
-	if c.tracer != nil {
-		contextWithTrace, span := c.tracer.Start(ctx, fmt.Sprintf("arangodb-%v", operation))
-
-		// Add default attributes
-		span.SetAttributes(attribute.String("arangodb.operation", operation))
-
-		// Add custom attributes if provided
-		for key, value := range attributes {
-			span.SetAttributes(attribute.String(fmt.Sprintf("arangodb.%s", key), value))
-		}
-
-		return contextWithTrace, span
-	}
-
-	return ctx, nil
-}
-
-func (c *Client) sendOperationStats(ql *QueryLog, startTime time.Time, method string, span trace.Span) {
-	duration := time.Since(startTime).Microseconds()
-	ql.Duration = duration
-
-	c.logger.Debug(ql)
-
-	c.metrics.RecordHistogram(context.Background(), "app_arango_stats", float64(duration),
-		"endpoint", c.endpoint,
-		"type", ql.Query,
-	)
-
-	if span != nil {
-		defer span.End()
-
-		span.SetAttributes(attribute.Int64(fmt.Sprintf("arangodb.%v.duration", method), duration))
-	}
 }
 
 // Health represents the health status of ArangoDB.
