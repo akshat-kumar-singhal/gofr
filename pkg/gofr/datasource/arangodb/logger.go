@@ -14,6 +14,7 @@ type QueryLog struct {
 	Duration   int64  `json:"duration"`
 	Host       string `json:"host,omitempty"`
 	Database   string `json:"database,omitempty"`
+	Graph      string `json:"graph,omitempty"`
 	Collection string `json:"collection,omitempty"`
 	Filter     any    `json:"filter,omitempty"`
 	ID         any    `json:"id,omitempty"`
@@ -38,6 +39,7 @@ func (ql *QueryLog) GetTraceLabels() map[string]string {
 		observability.LabelOperation: ql.Operation,
 		observability.LabelDatabase:  ql.Database,
 		observability.LabelTable:     ql.Collection,
+		"graph":                      ql.Graph,
 	}
 }
 

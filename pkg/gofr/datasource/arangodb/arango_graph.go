@@ -137,7 +137,7 @@ func (c *Client) GetEdges(ctx context.Context, dbName, graphName, edgeCollection
 		return fmt.Errorf("%w: must be *[]arangodb.EdgeDetails", errInvalidResponseType)
 	}
 
-	ql := &QueryLog{Operation: "getEdges", Host: c.endpoint, Database: dbName, Collection: edgeCollection}
+	ql := &QueryLog{Operation: "getEdges", Host: c.endpoint, Database: dbName, Collection: edgeCollection, Graph: graphName}
 
 	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
 

@@ -222,13 +222,32 @@ func (c *Client) getDatabase() string {
 	return ""
 }
 
-// InsertOne inserts a single document into the specified collection.
-func (c *Client) InsertOne(ctx context.Context, collection string, document any) (any, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "insertOne"}
+// instrumentQuery creates a QueryLog and sets up tracing/metrics instrumentation.
+// Returns the traced context and a cleanup function to be deferred.
+func (c *Client) instrumentQuery(ctx context.Context, collection, operation string, filter, id, update any) (
+	tracerCtx context.Context, done func()) {
+	query := &QueryLog{
+		Host:       c.getHost(),
+		Database:   c.getDatabase(),
+		Collection: collection,
+		Query:      operation,
+		Filter:     filter,
+		ID:         id,
+		Update:     update,
+	}
 
 	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
+	startTime := time.Now()
 
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	return tracerCtx, func() {
+		c.instrumentation.OperationStats(ctx, query, startTime, span)
+	}
+}
+
+// InsertOne inserts a single document into the specified collection.
+func (c *Client) InsertOne(ctx context.Context, collection string, document any) (any, error) {
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "insertOne", nil, nil, nil)
+	defer done()
 
 	result, err := c.Database.Collection(collection).InsertOne(tracerCtx, document)
 
@@ -237,11 +256,8 @@ func (c *Client) InsertOne(ctx context.Context, collection string, document any)
 
 // InsertMany inserts multiple documents into the specified collection.
 func (c *Client) InsertMany(ctx context.Context, collection string, documents []any) ([]any, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "insertMany", Filter: documents}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "insertMany", nil, nil, nil)
+	defer done()
 
 	res, err := c.Database.Collection(collection).InsertMany(tracerCtx, documents)
 	if err != nil {
@@ -253,11 +269,8 @@ func (c *Client) InsertMany(ctx context.Context, collection string, documents []
 
 // Find retrieves documents from the specified collection based on the provided filter and binds response to result.
 func (c *Client) Find(ctx context.Context, collection string, filter, results any) error {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "find", Filter: filter}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "find", filter, nil, nil)
+	defer done()
 
 	cur, err := c.Database.Collection(collection).Find(tracerCtx, filter)
 	if err != nil {
@@ -275,11 +288,8 @@ func (c *Client) Find(ctx context.Context, collection string, filter, results an
 
 // FindOne retrieves a single document from the specified collection based on the provided filter and binds response to result.
 func (c *Client) FindOne(ctx context.Context, collection string, filter, result any) error {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "findOne", Filter: filter}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "findOne", filter, nil, nil)
+	defer done()
 
 	b, err := c.Database.Collection(collection).FindOne(tracerCtx, filter).Raw()
 	if err != nil {
@@ -291,11 +301,8 @@ func (c *Client) FindOne(ctx context.Context, collection string, filter, result 
 
 // UpdateByID updates a document in the specified collection by its ID.
 func (c *Client) UpdateByID(ctx context.Context, collection string, id, update any) (int64, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "updateByID", ID: id, Update: update}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "updateByID", nil, id, update)
+	defer done()
 
 	res, err := c.Database.Collection(collection).UpdateByID(tracerCtx, id, update)
 
@@ -304,12 +311,8 @@ func (c *Client) UpdateByID(ctx context.Context, collection string, id, update a
 
 // UpdateOne updates a single document in the specified collection based on the provided filter.
 func (c *Client) UpdateOne(ctx context.Context, collection string, filter, update any) error {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection,
-		Query: "updateOne", Filter: filter, Update: update}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "updateOne", filter, nil, update)
+	defer done()
 
 	_, err := c.Database.Collection(collection).UpdateOne(tracerCtx, filter, update)
 
@@ -318,12 +321,8 @@ func (c *Client) UpdateOne(ctx context.Context, collection string, filter, updat
 
 // UpdateMany updates multiple documents in the specified collection based on the provided filter.
 func (c *Client) UpdateMany(ctx context.Context, collection string, filter, update any) (int64, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection,
-		Query: "updateMany", Filter: filter, Update: update}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "updateMany", filter, nil, update)
+	defer done()
 
 	res, err := c.Database.Collection(collection).UpdateMany(tracerCtx, filter, update)
 
@@ -332,11 +331,8 @@ func (c *Client) UpdateMany(ctx context.Context, collection string, filter, upda
 
 // CountDocuments counts the number of documents in the specified collection based on the provided filter.
 func (c *Client) CountDocuments(ctx context.Context, collection string, filter any) (int64, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "countDocuments", Filter: filter}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "countDocuments", filter, nil, nil)
+	defer done()
 
 	result, err := c.Database.Collection(collection).CountDocuments(tracerCtx, filter)
 
@@ -345,11 +341,8 @@ func (c *Client) CountDocuments(ctx context.Context, collection string, filter a
 
 // DeleteOne deletes a single document from the specified collection based on the provided filter.
 func (c *Client) DeleteOne(ctx context.Context, collection string, filter any) (int64, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "deleteOne", Filter: filter}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "deleteOne", filter, nil, nil)
+	defer done()
 
 	res, err := c.Database.Collection(collection).DeleteOne(tracerCtx, filter)
 	if err != nil {
@@ -361,11 +354,8 @@ func (c *Client) DeleteOne(ctx context.Context, collection string, filter any) (
 
 // DeleteMany deletes multiple documents from the specified collection based on the provided filter.
 func (c *Client) DeleteMany(ctx context.Context, collection string, filter any) (int64, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "deleteMany", Filter: filter}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "deleteMany", filter, nil, nil)
+	defer done()
 
 	res, err := c.Database.Collection(collection).DeleteMany(tracerCtx, filter)
 	if err != nil {
@@ -377,11 +367,8 @@ func (c *Client) DeleteMany(ctx context.Context, collection string, filter any) 
 
 // Drop drops the specified collection from the database.
 func (c *Client) Drop(ctx context.Context, collection string) error {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: collection, Query: "drop"}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, collection, "drop", nil, nil, nil)
+	defer done()
 
 	err := c.Database.Collection(collection).Drop(tracerCtx)
 
@@ -390,11 +377,8 @@ func (c *Client) Drop(ctx context.Context, collection string) error {
 
 // CreateCollection creates the specified collection in the database.
 func (c *Client) CreateCollection(ctx context.Context, name string) error {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Collection: name, Query: "createCollection"}
-
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-
-	defer c.instrumentation.OperationStats(ctx, query, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, name, "createCollection", nil, nil, nil)
+	defer done()
 
 	err := c.Database.CreateCollection(tracerCtx, name)
 
@@ -428,9 +412,8 @@ func (c *Client) HealthCheck(ctx context.Context) (any, error) {
 }
 
 func (c *Client) StartSession() (any, error) {
-	query := &QueryLog{Host: c.getHost(), Database: c.getDatabase(), Query: "startSession"}
-
-	defer c.instrumentation.OperationStats(context.Background(), query, time.Now(), nil)
+	_, done := c.instrumentQuery(context.Background(), "", "startSession", nil, nil, nil)
+	defer done()
 
 	s, err := c.Client().StartSession()
 	ses := &session{s}
