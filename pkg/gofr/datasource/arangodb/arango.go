@@ -11,7 +11,6 @@ import (
 	arangoShared "github.com/arangodb/go-driver/v2/arangodb/shared"
 	"github.com/arangodb/go-driver/v2/connection"
 	"go.opentelemetry.io/otel/trace"
-
 	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
