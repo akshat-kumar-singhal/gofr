@@ -14,7 +14,6 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/integration/mtest"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/mock/gomock"
-
 	"gofr.dev/pkg/gofr/datasource/observability"
 )
 

@@ -11,8 +11,9 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/mock/gomock"
-	"gofr.dev/pkg/gofr/datasource/arangodb/mocks"
 	"gofr.dev/pkg/gofr/datasource/observability"
+
+	"gofr.dev/pkg/gofr/datasource/arangodb/mocks"
 )
 
 var (

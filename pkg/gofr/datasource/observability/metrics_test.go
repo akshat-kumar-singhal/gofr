@@ -14,10 +14,10 @@ func TestGetDefaultHistogramBuckets(t *testing.T) {
 	require.Len(t, buckets, 16)
 
 	// First bucket should be 0.05 (50ms)
-	assert.Equal(t, 0.05, buckets[0])
+	assert.InDelta(t, 0.05, buckets[0], 1e-9)
 
 	// Last bucket should be 10 (10 seconds)
-	assert.Equal(t, 10.0, buckets[len(buckets)-1])
+	assert.InDelta(t, 10.0, buckets[len(buckets)-1], 1e-9)
 }
 
 func TestGetDefaultHistogramBuckets_AscendingOrder(t *testing.T) {
