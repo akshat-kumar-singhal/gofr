@@ -22,7 +22,7 @@ func tracerName(ds any) string {
 		return "gofr-clickhouse"
 	case container.OracleDB:
 		return "gofr-oracle"
-	case container.CassandraWithContext, container.Cassandra:
+	case container.CassandraWithContext:
 		return "gofr-cassandra"
 	case container.KVStore:
 		return "gofr-kvstore"
