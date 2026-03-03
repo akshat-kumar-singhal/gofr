@@ -22,10 +22,6 @@ const (
 type Metrics interface {
 	NewHistogram(name, desc string, buckets ...float64)
 	RecordHistogram(ctx context.Context, name string, value float64, labels ...string)
-	NewGauge(name, desc string)
-	SetGauge(name string, value float64, labels ...string)
-	NewCounter(name, desc string)
-	IncrementCounter(ctx context.Context, name string, labels ...string)
 }
 
 // GetDefaultHistogramBuckets returns the standard latency buckets for datasource stats histograms.

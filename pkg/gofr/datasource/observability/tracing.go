@@ -7,28 +7,6 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// StartTrace creates a new span for tracing an operation.
-// Returns the context with the span and the span itself.
-// If tracer is nil, returns the original context and nil span.
-//
-// Parameters:
-//   - ctx: Context for the trace
-//   - spanName: Name of the span (e.g., "mongodb-insert", "arangodb-query")
-//
-// Example:
-//
-//	ctx, span := c.instrumentation.StartTrace(ctx, "mongodb-insert")
-//	if span != nil {
-//	    span.SetAttributes(attribute.String("collection", "users"))
-//	}
-func (i *instrumentation) StartTrace(ctx context.Context, spanName string) (context.Context, trace.Span) {
-	if i.tracer != nil {
-		return i.tracer.Start(ctx, spanName)
-	}
-
-	return ctx, nil
-}
-
 // AddTrace creates a new span for tracing a datasource operation.
 // Span name and attributes are auto-derived from datasourceName:
 //   - Span name: {datasourceName}-{operation} (e.g., "mongo-insertOne", "arango-query")
