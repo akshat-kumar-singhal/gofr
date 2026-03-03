@@ -7,68 +7,174 @@ import (
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+
+	"gofr.dev/pkg/gofr/datasource/arangodb/mocks"
 )
 
-func Test_Client_CreateUser(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-
-	mockArango.EXPECT().CreateUser(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil, nil)
-
-	err := client.createUser(context.Background(), "test", UserOptions{
-		Password: "user123",
-		Extra:    nil,
-	})
-	require.NoError(t, err, "Test_Arango_CreateUser: failed to create user")
-}
-
-func Test_Client_DropUser(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-
-	mockArango.EXPECT().RemoveUser(gomock.Any(), gomock.Any()).Return(nil)
-
-	err := client.dropUser(context.Background(), "test")
-	require.NoError(t, err, "Test_Arango_DropUser: failed to drop user")
-}
-
-func Test_Client_GrantDB(t *testing.T) {
-	client, mockArango, mockUser := setupDB(t)
-
-	// Test data
-	ctx := context.Background()
-	dbName := "testDB"
-	username := "testUser"
-
-	// Expect user() call and return our mock user that implements the full interface
-	mockArango.EXPECT().User(gomock.Any(), username).Return(mockUser, nil).MaxTimes(2)
-
-	// Test cases
+func TestClient_CreateUser(t *testing.T) {
 	testCases := []struct {
-		name       string
-		dbName     string
-		username   string
-		permission string
-		expectErr  bool
+		name          string
+		expectedOp    string
+		username      string
+		userOpts      UserOptions
+		setupMocks    func(ctrl *gomock.Controller, mockArango *mocks.MockClient)
+		expectedError error
 	}{
 		{
-			name:       "Valid grant read-write",
-			dbName:     dbName,
-			username:   username,
-			permission: string(arangodb.GrantReadWrite),
-			expectErr:  false,
-		},
-		{
-			name:       "Valid grant read-only",
-			dbName:     dbName,
-			username:   username,
-			permission: string(arangodb.GrantReadOnly),
-			expectErr:  false,
+			name:       "Success",
+			expectedOp: "createUser",
+			username:   "test",
+			userOpts: UserOptions{
+				Password: "user123",
+				Extra:    nil,
+			},
+			setupMocks: func(_ *gomock.Controller, mockArango *mocks.MockClient) {
+				mockArango.EXPECT().CreateUser(gomock.Any(), "test", gomock.Any()).Return(nil, nil)
+			},
+			expectedError: nil,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := client.grantDB(ctx, tc.dbName, tc.username, tc.permission)
-			if tc.expectErr {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockArango := mocks.NewMockClient(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+
+			tc.setupMocks(ctrl, mockArango)
+
+			err := client.createUser(context.Background(), tc.username, tc.userOpts)
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.Equal(t, tc.expectedError, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestClient_DropUser(t *testing.T) {
+	testCases := []struct {
+		name          string
+		expectedOp    string
+		username      string
+		setupMocks    func(ctrl *gomock.Controller, mockArango *mocks.MockClient)
+		expectedError error
+	}{
+		{
+			name:       "Success",
+			expectedOp: "dropUser",
+			username:   "test",
+			setupMocks: func(_ *gomock.Controller, mockArango *mocks.MockClient) {
+				mockArango.EXPECT().RemoveUser(gomock.Any(), "test").Return(nil)
+			},
+			expectedError: nil,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockArango := mocks.NewMockClient(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+
+			tc.setupMocks(ctrl, mockArango)
+
+			err := client.dropUser(context.Background(), tc.username)
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.Equal(t, tc.expectedError, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestClient_GrantDB(t *testing.T) {
+	testCases := []struct {
+		name          string
+		expectedOp    string
+		dbName        string
+		username      string
+		permission    string
+		setupMocks    func(ctrl *gomock.Controller, mockArango *mocks.MockClient, mockUser *mocks.MockUser)
+		expectedError error
+	}{
+		{
+			name:       "Success_ReadWrite",
+			expectedOp: "grantDB",
+			dbName:     "testDB",
+			username:   "testUser",
+			permission: string(arangodb.GrantReadWrite),
+			setupMocks: func(_ *gomock.Controller, mockArango *mocks.MockClient, mockUser *mocks.MockUser) {
+				mockArango.EXPECT().User(gomock.Any(), "testUser").Return(mockUser, nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name:       "Success_ReadOnly",
+			expectedOp: "grantDB",
+			dbName:     "testDB",
+			username:   "testUser",
+			permission: string(arangodb.GrantReadOnly),
+			setupMocks: func(_ *gomock.Controller, mockArango *mocks.MockClient, mockUser *mocks.MockUser) {
+				mockArango.EXPECT().User(gomock.Any(), "testUser").Return(mockUser, nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name:       "Error_UserNotFound",
+			expectedOp: "grantDB",
+			dbName:     "testDB",
+			username:   "testUser",
+			permission: string(arangodb.GrantReadWrite),
+			setupMocks: func(_ *gomock.Controller, mockArango *mocks.MockClient, _ *mocks.MockUser) {
+				mockArango.EXPECT().User(gomock.Any(), "testUser").Return(nil, errUserNotFound)
+			},
+			expectedError: errUserNotFound,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			mockArango := mocks.NewMockClient(ctrl)
+			mockUser := mocks.NewMockUser(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+
+			tc.setupMocks(ctrl, mockArango, mockUser)
+
+			err := client.grantDB(context.Background(), tc.dbName, tc.username, tc.permission)
+
+			if tc.expectedError != nil {
 				require.Error(t, err)
 			} else {
 				require.NoError(t, err)
@@ -77,131 +183,205 @@ func Test_Client_GrantDB(t *testing.T) {
 	}
 }
 
-func Test_Client_GrantDB_Errors(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
+func TestClient_GrantCollection(t *testing.T) {
+	testCases := []struct {
+		name           string
+		expectedOp     string
+		dbName         string
+		collectionName string
+		username       string
+		permission     string
+		setupMocks     func(ctrl *gomock.Controller, mockArango *mocks.MockClient, mockUser *mocks.MockUser)
+		expectedError  error
+	}{
+		{
+			name:           "Success",
+			expectedOp:     "grantCollection",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			username:       "testUser",
+			permission:     string(arangodb.GrantReadOnly),
+			setupMocks: func(_ *gomock.Controller, mockArango *mocks.MockClient, mockUser *mocks.MockUser) {
+				mockArango.EXPECT().User(gomock.Any(), "testUser").Return(mockUser, nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name:           "Error_UserNotFound",
+			expectedOp:     "grantCollection",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			username:       "testUser",
+			permission:     string(arangodb.GrantReadOnly),
+			setupMocks: func(_ *gomock.Controller, mockArango *mocks.MockClient, _ *mocks.MockUser) {
+				mockArango.EXPECT().User(gomock.Any(), "testUser").Return(nil, errUserNotFound)
+			},
+			expectedError: errUserNotFound,
+		},
+	}
 
-	ctx := context.Background()
-	dbName := "testDB"
-	username := "testUser"
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	// Expect user() call to return error
-	mockArango.EXPECT().User(gomock.Any(), username).Return(nil, errUserNotFound)
+			mockArango := mocks.NewMockClient(ctrl)
+			mockUser := mocks.NewMockUser(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
 
-	err := client.grantDB(ctx, dbName, username, string(arangodb.GrantReadWrite))
-	require.Error(t, err)
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+
+			tc.setupMocks(ctrl, mockArango, mockUser)
+
+			err := client.grantCollection(context.Background(), tc.dbName, tc.collectionName, tc.username, tc.permission)
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.ErrorIs(t, tc.expectedError, err)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestUser(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	testCases := []struct {
+		name          string
+		username      string
+		setupMocks    func(mockArango *mocks.MockClient, mockUser *mocks.MockUser)
+		expectUser    bool
+		expectedError error
+	}{
+		{
+			name:     "Success",
+			username: "testUser",
+			setupMocks: func(mockArango *mocks.MockClient, mockUser *mocks.MockUser) {
+				mockArango.EXPECT().User(gomock.Any(), "testUser").Return(mockUser, nil)
+			},
+			expectUser:    true,
+			expectedError: nil,
+		},
+		{
+			name:     "Error_UserNotFound",
+			username: "testUser",
+			setupMocks: func(mockArango *mocks.MockClient, _ *mocks.MockUser) {
+				mockArango.EXPECT().User(gomock.Any(), "testUser").Return(nil, errUserNotFound)
+			},
+			expectUser:    false,
+			expectedError: errUserNotFound,
+		},
+	}
 
-	mockArango := NewMockClient(ctrl)
-	mockUser := NewMockUser(ctrl)
-	client := &Client{client: mockArango}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	ctx := context.Background()
-	username := "testUser"
+			mockArango := mocks.NewMockClient(ctrl)
+			mockUser := mocks.NewMockUser(ctrl)
+			client := &Client{client: mockArango}
 
-	t.Run("Successful user fetch", func(t *testing.T) {
-		mockArango.EXPECT().
-			User(ctx, username).
-			Return(mockUser, nil)
+			tc.setupMocks(mockArango, mockUser)
 
-		user, err := client.user(ctx, username)
-		require.NoError(t, err)
-		require.NotNil(t, user)
-	})
+			user, err := client.user(context.Background(), tc.username)
 
-	t.Run("user fetch error", func(t *testing.T) {
-		mockArango.EXPECT().
-			User(ctx, username).
-			Return(nil, errUserNotFound)
-
-		user, err := client.user(ctx, username)
-		require.Error(t, err)
-		require.Nil(t, user)
-	})
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.Nil(t, user)
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, user)
+			}
+		})
+	}
 }
 
 func TestClient_Database(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+	testCases := []struct {
+		name          string
+		dbName        string
+		setupMocks    func(mockArango *mocks.MockClient, mockDB *mocks.MockDatabase)
+		validate      func(t *testing.T, db arangodb.Database, mockDB *mocks.MockDatabase)
+		expectedError error
+	}{
+		{
+			name:   "Success",
+			dbName: "testDB",
+			setupMocks: func(mockArango *mocks.MockClient, mockDB *mocks.MockDatabase) {
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil)
+				mockDB.EXPECT().Name().Return("testDB")
+			},
+			validate: func(t *testing.T, db arangodb.Database, _ *mocks.MockDatabase) {
+				t.Helper()
+				require.NotNil(t, db)
+				require.Equal(t, "testDB", db.Name())
+			},
+			expectedError: nil,
+		},
+		{
+			name:   "Error_DBNotFound",
+			dbName: "testDB",
+			setupMocks: func(mockArango *mocks.MockClient, _ *mocks.MockDatabase) {
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(nil, errDBNotFound)
+			},
+			validate: func(t *testing.T, db arangodb.Database, _ *mocks.MockDatabase) {
+				t.Helper()
+				require.Nil(t, db)
+			},
+			expectedError: errDBNotFound,
+		},
+		{
+			name:   "DatabaseOperations",
+			dbName: "testDB",
+			setupMocks: func(mockArango *mocks.MockClient, mockDB *mocks.MockDatabase) {
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil)
+				mockDB.EXPECT().Name().Return("testDB")
+				mockDB.EXPECT().Remove(gomock.Any()).Return(nil)
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(nil, nil)
+			},
+			validate: func(t *testing.T, db arangodb.Database, mockDB *mocks.MockDatabase) {
+				t.Helper()
+				require.NotNil(t, db)
+				require.Equal(t, "testDB", db.Name())
 
-	mockArango := NewMockClient(ctrl)
+				err := db.Remove(context.Background())
+				require.NoError(t, err)
 
-	config := Config{Host: "localhost", Port: 8527, User: "root", Password: "root"}
-	client := New(config)
+				coll, err := db.GetCollection(context.Background(), "testCollection", nil)
+				require.NoError(t, err)
+				require.Nil(t, coll)
+			},
+			expectedError: nil,
+		},
+	}
 
-	client.client = mockArango
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	mockDatabase := NewMockDatabase(gomock.NewController(t))
+			mockArango := mocks.NewMockClient(ctrl)
+			mockDB := mocks.NewMockDatabase(ctrl)
 
-	ctx := context.Background()
-	dbName := "testDB"
+			client := New(Config{Host: "localhost", Port: 8527, User: "root", Password: "root"})
+			client.client = mockArango
 
-	t.Run("Get database Success", func(t *testing.T) {
-		mockArango.EXPECT().
-			GetDatabase(ctx, dbName, nil).
-			Return(mockDatabase, nil)
-		mockDatabase.EXPECT().Name().Return(dbName)
+			tc.setupMocks(mockArango, mockDB)
 
-		db, err := client.database(ctx, dbName)
-		require.NoError(t, err)
-		require.NotNil(t, db)
-		require.Equal(t, dbName, db.Name())
-	})
+			db, err := client.database(context.Background(), tc.dbName)
 
-	t.Run("Get database Error", func(t *testing.T) {
-		mockArango.EXPECT().
-			GetDatabase(ctx, dbName, nil).
-			Return(nil, errDBNotFound)
+			if tc.expectedError != nil {
+				require.Error(t, err)
+			} else {
+				require.NoError(t, err)
+			}
 
-		db, err := client.database(ctx, dbName)
-		require.Error(t, err)
-		require.Nil(t, db)
-	})
-
-	// Test database operations
-	t.Run("database Operations", func(t *testing.T) {
-		mockArango.EXPECT().
-			GetDatabase(ctx, dbName, nil).
-			Return(mockDatabase, nil)
-		mockDatabase.EXPECT().Name().Return(dbName)
-		mockDatabase.EXPECT().Remove(ctx).Return(nil)
-		mockDatabase.EXPECT().GetCollection(ctx, "testCollection", nil).
-			Return(nil, nil)
-
-		db, err := client.database(ctx, dbName)
-		require.NoError(t, err)
-		require.Equal(t, dbName, db.Name())
-
-		err = db.Remove(ctx)
-		require.NoError(t, err)
-
-		coll, err := db.GetCollection(ctx, "testCollection", nil)
-		require.NoError(t, err)
-		require.Nil(t, coll)
-	})
-}
-
-func Test_Client_GrantCollection(t *testing.T) {
-	client, mockArango, mockUser := setupDB(t)
-
-	mockArango.EXPECT().User(gomock.Any(), "testUser").Return(mockUser, nil)
-
-	err := client.grantCollection(context.Background(), "testDB", "testCollection",
-		"testUser", string(arangodb.GrantReadOnly))
-
-	require.NoError(t, err)
-}
-
-func Test_Client_GrantCollection_Error(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-
-	mockArango.EXPECT().User(gomock.Any(), "testUser").Return(nil, errUserNotFound)
-
-	err := client.grantCollection(context.Background(), "testDB", "testCollection",
-		"testUser", string(arangodb.GrantReadOnly))
-
-	require.ErrorIs(t, errUserNotFound, err, "Expected error when user not found")
+			tc.validate(t, db, mockDB)
+		})
+	}
 }

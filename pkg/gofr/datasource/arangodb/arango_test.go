@@ -7,8 +7,13 @@ import (
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/arangodb/go-driver/v2/arangodb/shared"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/mock/gomock"
+
+	"gofr.dev/pkg/gofr/datasource/arangodb/mocks"
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 var (
@@ -17,15 +22,15 @@ var (
 	errDocumentNotFound = errors.New("document not found")
 )
 
-func setupDB(t *testing.T) (*Client, *MockClient, *MockUser) {
+func setupDB(t *testing.T) (*Client, *mocks.MockClient, *mocks.MockUser) {
 	t.Helper()
 
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	// Setup
-	mockArango := NewMockClient(ctrl)
-	mockUser := NewMockUser(ctrl)
+	mockArango := mocks.NewMockClient(ctrl)
+	mockUser := mocks.NewMockUser(ctrl)
 
 	config := Config{Host: "localhost", Port: 8527, User: "root", Password: "root"}
 	client := New(config)
@@ -35,41 +40,147 @@ func setupDB(t *testing.T) (*Client, *MockClient, *MockUser) {
 	return client, mockArango, mockUser
 }
 
-func Test_NewArangoClient_Error(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
+// setupMockInstrumenter creates a mock instrumenter with AddTrace and OperationStats expectations.
+// It accepts a gomock.Controller to use the same controller as the test.
+// count controls the expected number of instrumentation calls:
+// - count = 0: No instrumentation calls expected (validation fails before instrumentation)
+// - count = 1: Expects one AddTrace + one OperationStats call
+func setupMockInstrumenter(t *testing.T, ctrl *gomock.Controller, expectedOperation string, count int) *observability.MockInstrumenter {
+	t.Helper()
 
-	client := New(Config{Host: "localhost", Port: 8529, Password: "root", User: "admin"})
+	mockInstr := observability.NewMockInstrumenter(ctrl)
 
-	client.Connect()
+	mockInstr.EXPECT().
+		AddTrace(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, q observability.ObservableQuery) (context.Context, trace.Span) {
+			assert.Equal(t, expectedOperation, q.GetOperation())
+			return ctx, nil
+		}).Times(count)
 
-	require.NotNil(t, client)
+	mockInstr.EXPECT().
+		OperationStats(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(count)
+
+	// Allow Debugf calls (used for "already exists" scenarios)
+	mockInstr.EXPECT().
+		Debugf(gomock.Any(), gomock.Any()).
+		AnyTimes()
+
+	return mockInstr
 }
 
-func TestClient_Query_Success(t *testing.T) {
-	test := setupGraphTest(t)
-	defer test.Ctrl.Finish()
+// MockQueryCursor implements arangodb.Cursor for testing.
+type MockQueryCursor struct {
+	ctrl *gomock.Controller
+	data []map[string]any
+	idx  int
+}
 
-	dbName := "testDB"
-	query := "FOR doc IN collection RETURN doc"
-	bindVars := map[string]any{"key": "value"}
+func NewMockQueryCursor(ctrl *gomock.Controller, data []map[string]any) *MockQueryCursor {
+	return &MockQueryCursor{
+		ctrl: ctrl,
+		data: data,
+		idx:  0,
+	}
+}
 
-	var result []map[string]any
+func (*MockQueryCursor) Close() error {
+	return nil
+}
 
-	expectedResult := []map[string]any{
-		{"_key": "doc1", "value": "test1"},
-		{"_key": "doc2", "value": "test2"},
+func (*MockQueryCursor) CloseWithContext(_ context.Context) error {
+	return nil
+}
+
+func (m *MockQueryCursor) HasMore() bool {
+	return m.idx < len(m.data)
+}
+
+func (m *MockQueryCursor) ReadDocument(_ context.Context, document any) (arangodb.DocumentMeta, error) {
+	if m.idx >= len(m.data) {
+		return arangodb.DocumentMeta{}, shared.NoMoreDocumentsError{}
 	}
 
-	test.MockArango.EXPECT().GetDatabase(test.Ctx, dbName, nil).
-		Return(test.MockDB, nil)
-	test.MockDB.EXPECT().Query(test.Ctx, query, &arangodb.QueryOptions{BindVars: bindVars}).
-		Return(NewMockQueryCursor(test.Ctrl, expectedResult), nil)
+	doc, ok := document.(*map[string]any)
+	if !ok {
+		return arangodb.DocumentMeta{}, errInvalidEdgeDocumentType
+	}
 
-	err := test.Client.Query(test.Ctx, dbName, query, bindVars, &result)
+	*doc = m.data[m.idx]
+	meta := arangodb.DocumentMeta{}
 
-	require.NoError(t, err)
-	require.Equal(t, expectedResult, result)
+	m.idx++
+
+	return meta, nil
+}
+
+func (m *MockQueryCursor) Count() int64 {
+	return int64(len(m.data))
+}
+
+func (*MockQueryCursor) Statistics() arangodb.CursorStats {
+	return arangodb.CursorStats{}
+}
+
+func (*MockQueryCursor) Plan() arangodb.CursorPlan {
+	return arangodb.CursorPlan{}
+}
+
+func TestNew(t *testing.T) {
+	testCases := []struct {
+		name     string
+		config   Config
+		validate func(t *testing.T, client *Client)
+	}{
+		{
+			name: "ValidConfig",
+			config: Config{
+				Host:     "localhost",
+				Port:     8529,
+				User:     "root",
+				Password: "password",
+			},
+			validate: func(t *testing.T, client *Client) {
+				t.Helper()
+				require.NotNil(t, client)
+				require.NotNil(t, client.config)
+				require.Equal(t, "localhost", client.config.Host)
+				require.Equal(t, 8529, client.config.Port)
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := New(tc.config)
+			tc.validate(t, client)
+		})
+	}
+}
+
+func TestClient_Connect(t *testing.T) {
+	testCases := []struct {
+		name   string
+		config Config
+	}{
+		{
+			name: "ConnectWithValidConfig",
+			config: Config{
+				Host:     "localhost",
+				Port:     8529,
+				User:     "admin",
+				Password: "root",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := New(tc.config)
+			client.Connect()
+			require.NotNil(t, client)
+		})
+	}
 }
 
 func TestValidateConfig(t *testing.T) {
@@ -146,199 +257,228 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
-func TestClient_HealthCheck_Success(t *testing.T) {
-	test := setupGraphTest(t)
-	defer test.Ctrl.Finish()
-
-	expectedVersion := arangodb.VersionInfo{
-		Version: "3.9.0",
-		Server:  "arango",
-	}
-
-	test.MockArango.EXPECT().Version(test.Ctx).Return(expectedVersion, nil)
-
-	health, err := test.Client.HealthCheck(test.Ctx)
-
-	require.NoError(t, err)
-
-	h, ok := health.(*Health)
-	require.True(t, ok)
-
-	require.Equal(t, "UP", h.Status)
-	require.Equal(t, test.Client.endpoint, h.Details["endpoint"])
-	require.Equal(t, expectedVersion.Version, h.Details["version"])
-	require.Equal(t, expectedVersion.Server, h.Details["server"])
-}
-
-func TestClient_HealthCheck_Error(t *testing.T) {
-	test := setupGraphTest(t)
-	defer test.Ctrl.Finish()
-
-	test.MockArango.EXPECT().Version(test.Ctx).Return(arangodb.VersionInfo{}, errStatusDown)
-
-	health, err := test.Client.HealthCheck(test.Ctx)
-
-	require.Error(t, err)
-	require.Equal(t, errStatusDown, err)
-
-	h, ok := health.(*Health)
-	require.True(t, ok)
-
-	require.Equal(t, "DOWN", h.Status)
-	require.Equal(t, test.Client.endpoint, h.Details["endpoint"])
-}
-
-type MockQueryCursor struct {
-	ctrl *gomock.Controller
-	data []map[string]any
-	idx  int
-}
-
-func NewMockQueryCursor(ctrl *gomock.Controller, data []map[string]any) *MockQueryCursor {
-	return &MockQueryCursor{
-		ctrl: ctrl,
-		data: data,
-		idx:  0,
-	}
-}
-
-func (*MockQueryCursor) Close() error {
-	return nil
-}
-
-func (*MockQueryCursor) CloseWithContext(_ context.Context) error {
-	return nil
-}
-
-func (m *MockQueryCursor) HasMore() bool {
-	return m.idx < len(m.data)
-}
-
-func (m *MockQueryCursor) ReadDocument(_ context.Context, document any) (arangodb.DocumentMeta, error) {
-	if m.idx >= len(m.data) {
-		return arangodb.DocumentMeta{}, shared.NoMoreDocumentsError{}
-	}
-
-	doc, ok := document.(*map[string]any)
-	if !ok {
-		return arangodb.DocumentMeta{}, errInvalidEdgeDocumentType
-	}
-
-	*doc = m.data[m.idx]
-	meta := arangodb.DocumentMeta{}
-
-	m.idx++
-
-	return meta, nil
-}
-
-func (m *MockQueryCursor) Count() int64 {
-	return int64(len(m.data))
-}
-
-func (*MockQueryCursor) Statistics() arangodb.CursorStats {
-	return arangodb.CursorStats{}
-}
-
-func (*MockQueryCursor) Plan() arangodb.CursorPlan {
-	return arangodb.CursorPlan{}
-}
-
-func TestClient_Query_WithBatchSizeAndFullCount(t *testing.T) {
-	test := setupGraphTest(t)
-	defer test.Ctrl.Finish()
-
-	dbName := "testDB"
-	query := "FOR doc IN collection RETURN doc"
-	bindVars := map[string]any{"key": "value"}
-
-	var result []map[string]any
-
-	expectedResult := []map[string]any{
-		{"_key": "doc1", "value": "v1"},
-		{"_key": "doc2", "value": "v2"},
-	}
-
-	// Define QueryOptions with batchSize and fullCount
-	queryOpts := map[string]any{
-		"batchSize": 50,
-		"options": map[string]any{
-			"fullCount": true,
+func TestClient_Query(t *testing.T) {
+	testCases := []struct {
+		name           string
+		expectedOp     string
+		dbName         string
+		query          string
+		bindVars       map[string]any
+		queryOpts      []map[string]any
+		setupMocks     func(test *TestGraph, ctrl *gomock.Controller)
+		expectedResult []map[string]any
+		expectedError  error
+	}{
+		{
+			name:       "Success",
+			expectedOp: "query",
+			dbName:     "testDB",
+			query:      "FOR doc IN collection RETURN doc",
+			bindVars:   map[string]any{"key": "value"},
+			setupMocks: func(test *TestGraph, ctrl *gomock.Controller) {
+				expectedResult := []map[string]any{
+					{"_key": "doc1", "value": "test1"},
+					{"_key": "doc2", "value": "test2"},
+				}
+				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
+					Return(test.MockDB, nil)
+				test.MockDB.EXPECT().Query(gomock.Any(), "FOR doc IN collection RETURN doc", &arangodb.QueryOptions{BindVars: map[string]any{"key": "value"}}).
+					Return(NewMockQueryCursor(ctrl, expectedResult), nil)
+			},
+			expectedResult: []map[string]any{
+				{"_key": "doc1", "value": "test1"},
+				{"_key": "doc2", "value": "test2"},
+			},
+			expectedError: nil,
+		},
+		{
+			name:       "WithBatchSizeAndFullCount",
+			expectedOp: "query",
+			dbName:     "testDB",
+			query:      "FOR doc IN collection RETURN doc",
+			bindVars:   map[string]any{"key": "value"},
+			queryOpts: []map[string]any{{
+				"batchSize": 50,
+				"options": map[string]any{
+					"fullCount": true,
+				},
+			}},
+			setupMocks: func(test *TestGraph, ctrl *gomock.Controller) {
+				expectedResult := []map[string]any{
+					{"_key": "doc1", "value": "v1"},
+					{"_key": "doc2", "value": "v2"},
+				}
+				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
+					Return(test.MockDB, nil)
+				test.MockDB.EXPECT().
+					Query(gomock.Any(), "FOR doc IN collection RETURN doc", gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ string, opts *arangodb.QueryOptions) (arangodb.Cursor, error) {
+						require.NotNil(t, opts)
+						require.Equal(t, 50, opts.BatchSize)
+						require.True(t, opts.Options.FullCount)
+						return NewMockQueryCursor(ctrl, expectedResult), nil
+					})
+			},
+			expectedResult: []map[string]any{
+				{"_key": "doc1", "value": "v1"},
+				{"_key": "doc2", "value": "v2"},
+			},
+			expectedError: nil,
+		},
+		{
+			name:       "WithMaxPlans",
+			expectedOp: "query",
+			dbName:     "testDB",
+			query:      "FOR doc IN collection RETURN doc",
+			bindVars:   map[string]any{"key": "value"},
+			queryOpts: []map[string]any{{
+				"options": map[string]any{
+					"maxPlans": 5,
+				},
+			}},
+			setupMocks: func(test *TestGraph, ctrl *gomock.Controller) {
+				expectedResult := []map[string]any{
+					{"_key": "doc1", "value": "v1"},
+				}
+				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
+					Return(test.MockDB, nil)
+				test.MockDB.EXPECT().
+					Query(gomock.Any(), "FOR doc IN collection RETURN doc", gomock.Any()).
+					DoAndReturn(func(_ context.Context, _ string, opts *arangodb.QueryOptions) (arangodb.Cursor, error) {
+						require.NotNil(t, opts)
+						require.Equal(t, 5, opts.Options.MaxPlans)
+						return NewMockQueryCursor(ctrl, expectedResult), nil
+					})
+			},
+			expectedResult: []map[string]any{
+				{"_key": "doc1", "value": "v1"},
+			},
+			expectedError: nil,
+		},
+		{
+			name:       "InvalidResultType",
+			expectedOp: "query",
+			dbName:     "testDB",
+			query:      "FOR doc IN collection RETURN doc",
+			bindVars:   map[string]any{"key": "value"},
+			setupMocks: func(test *TestGraph, ctrl *gomock.Controller) {
+				test.MockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
+					Return(test.MockDB, nil)
+				test.MockDB.EXPECT().Query(gomock.Any(), "FOR doc IN collection RETURN doc", gomock.Any()).
+					Return(NewMockQueryCursor(ctrl, nil), nil)
+			},
+			expectedError: errInvalidResultType,
 		},
 	}
 
-	test.MockArango.EXPECT().GetDatabase(test.Ctx, dbName, nil).
-		Return(test.MockDB, nil)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	test.MockDB.EXPECT().
-		Query(test.Ctx, query, gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, opts *arangodb.QueryOptions) (arangodb.Cursor, error) {
-			require.NotNil(t, opts)
-			require.Equal(t, 50, opts.BatchSize)
-			require.True(t, opts.Options.FullCount)
-			require.Equal(t, bindVars, opts.BindVars)
+			mockArango := mocks.NewMockClient(ctrl)
+			mockDB := mocks.NewMockDatabase(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
 
-			return NewMockQueryCursor(test.Ctrl, expectedResult), nil
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+			client.Document = &Document{client: client}
+
+			test := &TestGraph{
+				Ctrl:       ctrl,
+				MockArango: mockArango,
+				MockDB:     mockDB,
+				Client:     client,
+				Ctx:        context.Background(),
+			}
+
+			tc.setupMocks(test, ctrl)
+
+			// Handle InvalidResultType case separately
+			if tc.name == "InvalidResultType" {
+				var result int
+				err := client.Query(test.Ctx, tc.dbName, tc.query, tc.bindVars, &result)
+				require.Error(t, err)
+				require.Equal(t, tc.expectedError, err)
+				return
+			}
+
+			var result []map[string]any
+			var err error
+			if len(tc.queryOpts) > 0 {
+				err = client.Query(test.Ctx, tc.dbName, tc.query, tc.bindVars, &result, tc.queryOpts...)
+			} else {
+				err = client.Query(test.Ctx, tc.dbName, tc.query, tc.bindVars, &result)
+			}
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.Equal(t, tc.expectedError, err)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.expectedResult, result)
+			}
 		})
-
-	err := test.Client.Query(test.Ctx, dbName, query, bindVars, &result, queryOpts)
-	require.NoError(t, err)
-	require.Equal(t, expectedResult, result)
+	}
 }
 
-func TestClient_Query_WithMaxPlans(t *testing.T) {
-	test := setupGraphTest(t)
-	defer test.Ctrl.Finish()
-
-	dbName := "testDB"
-	query := "FOR doc IN collection RETURN doc"
-	bindVars := map[string]any{"key": "value"}
-
-	var result []map[string]any
-
-	expectedResult := []map[string]any{
-		{"_key": "doc1", "value": "v1"},
-	}
-
-	// Define QueryOptions with maxPlans sub-option
-	queryOpts := map[string]any{
-		"options": map[string]any{
-			"maxPlans": 5,
+func TestClient_HealthCheck(t *testing.T) {
+	testCases := []struct {
+		name           string
+		setupMocks     func(test *TestGraph)
+		expectedStatus string
+		expectedError  error
+	}{
+		{
+			name: "Success",
+			setupMocks: func(test *TestGraph) {
+				expectedVersion := arangodb.VersionInfo{
+					Version: "3.9.0",
+					Server:  "arango",
+				}
+				test.MockArango.EXPECT().Version(test.Ctx).Return(expectedVersion, nil)
+			},
+			expectedStatus: "UP",
+			expectedError:  nil,
+		},
+		{
+			name: "Error",
+			setupMocks: func(test *TestGraph) {
+				test.MockArango.EXPECT().Version(test.Ctx).Return(arangodb.VersionInfo{}, errStatusDown)
+			},
+			expectedStatus: "DOWN",
+			expectedError:  errStatusDown,
 		},
 	}
 
-	test.MockArango.EXPECT().GetDatabase(test.Ctx, dbName, nil).
-		Return(test.MockDB, nil)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			test := setupGraphTest(t)
+			defer test.Ctrl.Finish()
 
-	test.MockDB.EXPECT().
-		Query(test.Ctx, query, gomock.Any()).
-		DoAndReturn(func(_ context.Context, _ string, opts *arangodb.QueryOptions) (arangodb.Cursor, error) {
-			require.NotNil(t, opts)
-			require.Equal(t, 5, opts.Options.MaxPlans)
+			tc.setupMocks(test)
 
-			return NewMockQueryCursor(test.Ctrl, expectedResult), nil
+			health, err := test.Client.HealthCheck(test.Ctx)
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.Equal(t, tc.expectedError, err)
+			} else {
+				require.NoError(t, err)
+			}
+
+			h, ok := health.(*Health)
+			require.True(t, ok)
+			require.Equal(t, tc.expectedStatus, h.Status)
+			require.Equal(t, test.Client.endpoint, h.Details["endpoint"])
+
+			if tc.expectedStatus == "UP" {
+				require.Equal(t, arangodb.Version("3.9.0"), h.Details["version"])
+				require.Equal(t, "arango", h.Details["server"])
+			}
 		})
-
-	err := test.Client.Query(test.Ctx, dbName, query, bindVars, &result, queryOpts)
-	require.NoError(t, err)
-	require.Equal(t, expectedResult, result)
-}
-
-func TestClient_Query_InvalidResultType(t *testing.T) {
-	test := setupGraphTest(t)
-	defer test.Ctrl.Finish()
-
-	dbName := "testDB"
-	query := "FOR doc IN collection RETURN doc"
-	bindVars := map[string]any{"key": "value"}
-
-	var result int // Incorrect type
-
-	test.MockArango.EXPECT().GetDatabase(test.Ctx, dbName, nil).
-		Return(test.MockDB, nil)
-	test.MockDB.EXPECT().Query(test.Ctx, query, gomock.Any()).Return(NewMockQueryCursor(test.Ctrl, nil), nil)
-
-	err := test.Client.Query(test.Ctx, dbName, query, bindVars, &result)
-	require.Error(t, err)
-	require.Equal(t, errInvalidResultType, err)
+	}
 }

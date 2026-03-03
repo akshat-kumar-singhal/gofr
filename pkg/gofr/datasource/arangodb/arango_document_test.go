@@ -8,159 +8,329 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
+
+	"gofr.dev/pkg/gofr/datasource/arangodb/mocks"
 )
 
-func Test_Client_CreateDocument(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
+func TestClient_CreateDocument(t *testing.T) {
+	testCases := []struct {
+		name           string
+		expectedOp     string
+		dbName         string
+		collectionName string
+		document       any
+		setupMocks     func(ctrl *gomock.Controller, mockArango *mocks.MockClient)
+		expectedKey    string
+		expectedError  error
+	}{
+		{
+			name:           "Success",
+			expectedOp:     "createDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			document:       "testDocument",
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().Properties(gomock.Any()).Return(arangodb.CollectionProperties{}, nil)
+				mockCollection.EXPECT().CreateDocument(gomock.Any(), "testDocument").
+					Return(arangodb.CollectionDocumentCreateResponse{DocumentMeta: arangodb.DocumentMeta{Key: "testDocument", ID: "1"}}, nil)
+			},
+			expectedKey:   "testDocument",
+			expectedError: nil,
+		},
+		{
+			name:           "Error_CreateFails",
+			expectedOp:     "createDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			document:       "testDocument",
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().Properties(gomock.Any()).Return(arangodb.CollectionProperties{}, nil)
+				mockCollection.EXPECT().CreateDocument(gomock.Any(), "testDocument").
+					Return(arangodb.CollectionDocumentCreateResponse{}, errDocumentNotFound)
+			},
+			expectedKey:   "",
+			expectedError: errDocumentNotFound,
+		},
+	}
 
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().Properties(gomock.Any()).Return(arangodb.CollectionProperties{}, nil)
-	mockCollection.EXPECT().CreateDocument(gomock.Any(), "testDocument").
-		Return(arangodb.CollectionDocumentCreateResponse{DocumentMeta: arangodb.DocumentMeta{
-			Key: "testDocument", ID: "1"}}, nil)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	docName, err := client.CreateDocument(context.Background(), "testDB",
-		"testCollection", "testDocument")
-	require.Equal(t, "testDocument", docName)
-	require.NoError(t, err, "Expected no error while truncating the collection")
+			mockArango := mocks.NewMockClient(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+			client.DB = &DB{client: client}
+			client.Document = &Document{client: client}
+
+			tc.setupMocks(ctrl, mockArango)
+
+			docKey, err := client.CreateDocument(context.Background(), tc.dbName, tc.collectionName, tc.document)
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.ErrorIs(t, err, tc.expectedError)
+				require.Empty(t, docKey)
+			} else {
+				require.NoError(t, err)
+				require.Equal(t, tc.expectedKey, docKey)
+			}
+		})
+	}
 }
 
-func Test_Client_CreateDocument_Error(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
+func TestClient_GetDocument(t *testing.T) {
+	testCases := []struct {
+		name           string
+		expectedOp     string
+		dbName         string
+		collectionName string
+		documentID     string
+		result         any
+		setupMocks     func(ctrl *gomock.Controller, mockArango *mocks.MockClient)
+		expectedError  error
+	}{
+		{
+			name:           "Success",
+			expectedOp:     "getDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			documentID:     "testDocument",
+			result:         "",
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().ReadDocument(gomock.Any(), "testDocument", "").
+					Return(arangodb.DocumentMeta{Key: "testKey", ID: "1"}, nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name:           "Error_DocumentNotFound",
+			expectedOp:     "getDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			documentID:     "testDocument",
+			result:         "",
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().ReadDocument(gomock.Any(), "testDocument", "").
+					Return(arangodb.DocumentMeta{}, errDocumentNotFound)
+			},
+			expectedError: errDocumentNotFound,
+		},
+	}
 
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().Properties(gomock.Any()).Return(arangodb.CollectionProperties{}, nil)
-	mockCollection.EXPECT().CreateDocument(gomock.Any(), "testDocument").
-		Return(arangodb.CollectionDocumentCreateResponse{}, errDocumentNotFound)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	docName, err := client.CreateDocument(context.Background(), "testDB",
-		"testCollection", "testDocument")
-	require.Empty(t, docName)
-	require.ErrorIs(t, err, errDocumentNotFound, "Expected error when document not found")
+			mockArango := mocks.NewMockClient(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+			client.DB = &DB{client: client}
+			client.Document = &Document{client: client}
+
+			tc.setupMocks(ctrl, mockArango)
+
+			err := client.GetDocument(context.Background(), tc.dbName, tc.collectionName, tc.documentID, tc.result)
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.ErrorIs(t, err, tc.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
-func Test_Client_GetDocument(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
+func TestClient_UpdateDocument(t *testing.T) {
+	testCases := []struct {
+		name           string
+		expectedOp     string
+		dbName         string
+		collectionName string
+		documentID     string
+		document       map[string]any
+		setupMocks     func(ctrl *gomock.Controller, mockArango *mocks.MockClient)
+		expectedError  error
+	}{
+		{
+			name:           "Success",
+			expectedOp:     "updateDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			documentID:     "testDocument",
+			document:       map[string]any{"field": "value"},
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				document := map[string]any{"field": "value"}
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().UpdateDocument(gomock.Any(), "testDocument", document).
+					Return(arangodb.CollectionDocumentUpdateResponse{
+						DocumentMetaWithOldRev: arangodb.DocumentMetaWithOldRev{DocumentMeta: arangodb.DocumentMeta{Key: "testKey", ID: "1", Rev: ""}}}, nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name:           "Error_UpdateFails",
+			expectedOp:     "updateDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			documentID:     "testDocument",
+			document:       map[string]any{"field": "value"},
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				document := map[string]any{"field": "value"}
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().UpdateDocument(gomock.Any(), "testDocument", document).
+					Return(arangodb.CollectionDocumentUpdateResponse{}, errDocumentNotFound)
+			},
+			expectedError: errDocumentNotFound,
+		},
+	}
 
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().ReadDocument(gomock.Any(), "testDocument", "").Return(arangodb.DocumentMeta{
-		Key: "testKey", ID: "1"}, nil)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	err := client.GetDocument(context.Background(), "testDB",
-		"testCollection", "testDocument", "")
-	require.NoError(t, err, "Expected no error while reading  the document")
+			mockArango := mocks.NewMockClient(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
+
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+			client.DB = &DB{client: client}
+			client.Document = &Document{client: client}
+
+			tc.setupMocks(ctrl, mockArango)
+
+			err := client.UpdateDocument(context.Background(), tc.dbName, tc.collectionName, tc.documentID, tc.document)
+
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.ErrorIs(t, err, tc.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
-func Test_Client_GetDocument_Error(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
+func TestClient_DeleteDocument(t *testing.T) {
+	testCases := []struct {
+		name           string
+		expectedOp     string
+		dbName         string
+		collectionName string
+		documentID     string
+		setupMocks     func(ctrl *gomock.Controller, mockArango *mocks.MockClient)
+		expectedError  error
+	}{
+		{
+			name:           "Success",
+			expectedOp:     "deleteDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			documentID:     "testDocument",
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().DeleteDocument(gomock.Any(), "testDocument").
+					Return(arangodb.CollectionDocumentDeleteResponse{DocumentMeta: arangodb.DocumentMeta{Key: "testKey", ID: "1", Rev: ""}}, nil)
+			},
+			expectedError: nil,
+		},
+		{
+			name:           "Error_DeleteFails",
+			expectedOp:     "deleteDocument",
+			dbName:         "testDB",
+			collectionName: "testCollection",
+			documentID:     "testDocument",
+			setupMocks: func(ctrl *gomock.Controller, mockArango *mocks.MockClient) {
+				mockDB := mocks.NewMockDatabase(ctrl)
+				mockCollection := mocks.NewMockCollection(ctrl)
+				mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).Return(mockDB, nil).AnyTimes()
+				mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).Return(mockCollection, nil).AnyTimes()
+				mockCollection.EXPECT().DeleteDocument(gomock.Any(), "testDocument").
+					Return(arangodb.CollectionDocumentDeleteResponse{}, errDocumentNotFound)
+			},
+			expectedError: errDocumentNotFound,
+		},
+	}
 
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().ReadDocument(gomock.Any(), "testDocument", "").
-		Return(arangodb.DocumentMeta{}, errDocumentNotFound)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
 
-	err := client.GetDocument(context.Background(), "testDB",
-		"testCollection", "testDocument", "")
-	require.ErrorIs(t, err, errDocumentNotFound, "Expected error when document not found")
-}
+			mockArango := mocks.NewMockClient(ctrl)
+			mockInstr := setupMockInstrumenter(t, ctrl, tc.expectedOp, 1)
 
-func Test_Client_UpdateDocument(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
-	testDocument := map[string]any{"field": "value"}
+			client := &Client{
+				client:          mockArango,
+				instrumentation: mockInstr,
+				endpoint:        "http://localhost:8529",
+			}
+			client.DB = &DB{client: client}
+			client.Document = &Document{client: client}
 
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().UpdateDocument(gomock.Any(), "testDocument", testDocument).
-		Return(arangodb.CollectionDocumentUpdateResponse{
-			DocumentMetaWithOldRev: arangodb.DocumentMetaWithOldRev{DocumentMeta: arangodb.DocumentMeta{Key: "testKey", ID: "1", Rev: ""}}}, nil)
+			tc.setupMocks(ctrl, mockArango)
 
-	err := client.UpdateDocument(context.Background(), "testDB", "testCollection",
-		"testDocument", testDocument)
-	require.NoError(t, err, "Expected no error while updating the document")
-}
+			err := client.DeleteDocument(context.Background(), tc.dbName, tc.collectionName, tc.documentID)
 
-func Test_Client_UpdateDocument_Error(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
-	testDocument := map[string]any{"field": "value"}
-
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().UpdateDocument(gomock.Any(), "testDocument", testDocument).
-		Return(arangodb.CollectionDocumentUpdateResponse{}, errDocumentNotFound)
-
-	err := client.UpdateDocument(context.Background(), "testDB", "testCollection", "testDocument", testDocument)
-	require.ErrorIs(t, err, errDocumentNotFound, "Expected error while updating the document")
-}
-
-func Test_Client_DeleteDocument(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
-
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().DeleteDocument(gomock.Any(), "testDocument").
-		Return(arangodb.CollectionDocumentDeleteResponse{
-			DocumentMeta: arangodb.DocumentMeta{Key: "testKey", ID: "1", Rev: ""}}, nil)
-
-	err := client.DeleteDocument(context.Background(), "testDB", "testCollection",
-		"testDocument")
-	require.NoError(t, err, "Expected no error while updating the document")
-}
-
-func Test_Client_DeleteDocument_Error(t *testing.T) {
-	client, mockArango, _ := setupDB(t)
-	mockDB := NewMockDatabase(gomock.NewController(t))
-	mockCollection := NewMockCollection(gomock.NewController(t))
-
-	mockArango.EXPECT().GetDatabase(gomock.Any(), "testDB", nil).
-		Return(mockDB, nil).AnyTimes()
-	mockDB.EXPECT().GetCollection(gomock.Any(), "testCollection", nil).
-		Return(mockCollection, nil).AnyTimes()
-	mockCollection.EXPECT().DeleteDocument(gomock.Any(), "testDocument").
-		Return(arangodb.CollectionDocumentDeleteResponse{}, errDocumentNotFound)
-
-	err := client.DeleteDocument(context.Background(), "testDB", "testCollection",
-		"testDocument")
-	require.ErrorIs(t, err, errDocumentNotFound, "Expected error while updating the document")
+			if tc.expectedError != nil {
+				require.Error(t, err)
+				require.ErrorIs(t, err, tc.expectedError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
 }
 
 func TestExecuteCollectionOperation(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockArango := NewMockClient(ctrl)
-	mockDatabase := NewMockDatabase(ctrl)
-	mockCollection := NewMockCollection(ctrl)
+	mockArango := mocks.NewMockClient(ctrl)
+	mockDatabase := mocks.NewMockDatabase(ctrl)
+	mockCollection := mocks.NewMockCollection(ctrl)
 
 	client := New(Config{Host: "localhost", Port: 8527, User: "root", Password: "root"})
 
