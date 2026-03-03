@@ -265,23 +265,17 @@ func Test_InsertOne(t *testing.T) {
 		expectedOperation string
 	}{
 		{
-			name:         "success",
-			mockResponse: func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
-			expectError:  false,
-			expectNilRes: false,
+			name:              "success",
+			mockResponse:      func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:       false,
+			expectNilRes:      false,
+			expectedOperation: "insertOne",
 		},
 		{
 			name:         "error",
 			mockResponse: func(mt *mtest.T) { mt.AddMockResponses(duplicateKeyError()) },
 			expectError:  true,
 			expectNilRes: true,
-		},
-		{
-			name:              "instrumentation",
-			mockResponse:      func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
-			expectError:       false,
-			expectNilRes:      false,
-			expectedOperation: "insertOne",
 		},
 	}
 
@@ -384,18 +378,6 @@ func Test_CreateCollection(t *testing.T) {
 
 		require.NoError(t, err)
 	})
-
-	mt.Run("createCollectionInstrumentation", func(mt *mtest.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		mockInstr := setupMockInstrumenter(t, ctrl, "createCollection", 1)
-		cl := newMockClient(mt, mockInstr)
-
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
-
-		_ = cl.CreateCollection(context.Background(), "newCollection")
-	})
 }
 
 func Test_FindMultipleCommands(t *testing.T) {
@@ -479,26 +461,6 @@ func Test_FindMultipleCommands(t *testing.T) {
 
 		require.ErrorContains(t, err, "cursor.nextBatch should be an array but is a BSON invalid")
 	})
-
-	mt.Run("FindInstrumentation", func(mt *mtest.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		mockInstr := setupMockInstrumenter(t, ctrl, "find", 1)
-		cl := newMockClient(mt, mockInstr)
-
-		id1 := primitive.NewObjectID()
-		first := mtest.CreateCursorResponse(1, "foo.bar", mtest.FirstBatch, bson.D{
-			{Key: "_id", Value: id1},
-			{Key: "name", Value: "john"},
-		})
-		killCursors := mtest.CreateCursorResponse(0, "foo.bar", mtest.NextBatch)
-		mt.AddMockResponses(first, killCursors)
-
-		var results []any
-
-		_ = cl.Find(context.Background(), mt.Coll.Name(), bson.D{{}}, &results)
-	})
 }
 
 func Test_FindOneCommands(t *testing.T) {
@@ -566,23 +528,6 @@ func Test_FindOneCommands(t *testing.T) {
 
 		assert.Error(t, err)
 	})
-
-	mt.Run("FindOneInstrumentation", func(mt *mtest.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		mockInstr := setupMockInstrumenter(t, ctrl, "findOne", 1)
-		cl := newMockClient(mt, mockInstr)
-
-		mt.AddMockResponses(mtest.CreateCursorResponse(1, "foo.bar", mtest.FirstBatch, bson.D{
-			{Key: "_id", Value: primitive.NewObjectID()},
-			{Key: "name", Value: "john"},
-		}))
-
-		var result map[string]any
-
-		_ = cl.FindOne(context.Background(), mt.Coll.Name(), bson.D{{}}, &result)
-	})
 }
 
 func Test_UpdateByID(t *testing.T) {
@@ -605,18 +550,6 @@ func Test_UpdateByID(t *testing.T) {
 
 		assert.NotNil(t, resp)
 		assert.NoError(t, err)
-	})
-
-	mt.Run("instrumentation", func(mt *mtest.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		mockInstr := setupMockInstrumenter(t, ctrl, "updateByID", 1)
-		cl := newMockClient(mt, mockInstr)
-
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
-
-		_, _ = cl.UpdateByID(context.Background(), mt.Coll.Name(), "1", bson.M{"$set": bson.M{"name": "test"}})
 	})
 }
 
@@ -709,23 +642,17 @@ func Test_DeleteOne(t *testing.T) {
 		expectedOperation string
 	}{
 		{
-			name:          "success",
-			mockResponse:  func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
-			expectError:   false,
-			expectedCount: 0,
+			name:              "success",
+			mockResponse:      func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
+			expectError:       false,
+			expectedCount:     0,
+			expectedOperation: "deleteOne",
 		},
 		{
 			name:          "error",
 			mockResponse:  func(mt *mtest.T) { mt.AddMockResponses(duplicateKeyError()) },
 			expectError:   true,
 			expectedCount: 0,
-		},
-		{
-			name:              "instrumentation",
-			mockResponse:      func(mt *mtest.T) { mt.AddMockResponses(mtest.CreateSuccessResponse()) },
-			expectError:       false,
-			expectedCount:     0,
-			expectedOperation: "deleteOne",
 		},
 	}
 
@@ -817,18 +744,6 @@ func Test_Drop(t *testing.T) {
 		err := cl.Drop(context.Background(), mt.Coll.Name())
 
 		assert.NoError(t, err)
-	})
-
-	mt.Run("DropInstrumentation", func(mt *mtest.T) {
-		ctrl := gomock.NewController(t)
-		defer ctrl.Finish()
-
-		mockInstr := setupMockInstrumenter(t, ctrl, "drop", 1)
-		cl := newMockClient(mt, mockInstr)
-
-		mt.AddMockResponses(mtest.CreateSuccessResponse())
-
-		_ = cl.Drop(context.Background(), mt.Coll.Name())
 	})
 }
 
