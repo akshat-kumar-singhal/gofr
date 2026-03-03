@@ -5,8 +5,6 @@ import (
 	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
-
-	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 type DB struct {
@@ -17,14 +15,11 @@ type DB struct {
 // It first checks if the database already exists before attempting to create it.
 // Returns ErrDatabaseExists if the database already exists.
 func (d *DB) CreateDB(ctx context.Context, database string) error {
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, "createDB", map[string]string{
-		"DB": database,
-	})
+	ql := &QueryLog{Operation: "createDB", Host: d.client.endpoint, Database: database}
 
-	defer d.client.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: "createDB", Database: database},
-		time.Now(), "createDB", span,
-		observability.OperationLabels{Host: d.client.endpoint})
+	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
+
+	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	// Check if the database already exists
 	exists, err := d.client.client.DatabaseExists(tracerCtx, database)
@@ -44,14 +39,11 @@ func (d *DB) CreateDB(ctx context.Context, database string) error {
 
 // DropDB deletes a database from ArangoDB.
 func (d *DB) DropDB(ctx context.Context, database string) error {
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, "dropDB", map[string]string{
-		"DB": database,
-	})
+	ql := &QueryLog{Operation: "dropDB", Host: d.client.endpoint, Database: database}
 
-	defer d.client.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: "dropDB", Database: database},
-		time.Now(), "dropDB", span,
-		observability.OperationLabels{Host: d.client.endpoint})
+	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
+
+	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	db, err := d.client.client.GetDatabase(tracerCtx, database, &arangodb.GetDatabaseOptions{})
 	if err != nil {
@@ -70,14 +62,11 @@ func (d *DB) DropDB(ctx context.Context, database string) error {
 // It first checks if the collection already exists before attempting to create it.
 // Returns ErrCollectionExists if the collection already exists.
 func (d *DB) CreateCollection(ctx context.Context, database, collection string, isEdge bool) error {
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, "createCollection", map[string]string{
-		"collection": collection,
-	})
+	ql := &QueryLog{Operation: "createCollection", Host: d.client.endpoint, Database: database, Collection: collection, Filter: isEdge}
 
-	defer d.client.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: "createCollection", Database: database, Collection: collection, Filter: isEdge},
-		time.Now(), "createCollection", span,
-		observability.OperationLabels{Host: d.client.endpoint, Table: collection})
+	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
+
+	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	db, err := d.client.client.GetDatabase(tracerCtx, database, nil)
 	if err != nil {
@@ -131,14 +120,11 @@ func (d *DB) getCollection(ctx context.Context, dbName, collectionName string) (
 // handleCollectionOperation handles common logic for collection operations.
 func (d *DB) handleCollectionOperation(ctx context.Context, operation, database, collectionName string,
 	action func(arangodb.Collection) error) error {
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, operation, map[string]string{
-		"collection": collectionName,
-	})
+	ql := &QueryLog{Operation: operation, Host: d.client.endpoint, Database: database, Collection: collectionName}
 
-	defer d.client.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: operation, Database: database, Collection: collectionName},
-		time.Now(), operation, span,
-		observability.OperationLabels{Host: d.client.endpoint, Table: collectionName})
+	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
+
+	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	collection, err := d.getCollection(tracerCtx, database, collectionName)
 	if err != nil {

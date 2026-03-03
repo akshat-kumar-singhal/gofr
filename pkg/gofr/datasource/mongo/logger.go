@@ -5,12 +5,16 @@ import (
 	"io"
 	"regexp"
 	"strings"
+
+	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 // QueryLog represents a MongoDB query log entry for debugging and monitoring.
 type QueryLog struct {
 	Query      string `json:"query"`
 	Duration   int64  `json:"duration"`
+	Host       string `json:"host,omitempty"`
+	Database   string `json:"database,omitempty"`
 	Collection string `json:"collection,omitempty"`
 	Filter     any    `json:"filter,omitempty"`
 	ID         any    `json:"id,omitempty"`
@@ -24,6 +28,27 @@ func (ql *QueryLog) SetDuration(d int64) {
 
 func (ql *QueryLog) GetOperation() string {
 	return ql.Query
+}
+
+func (ql *QueryLog) GetCollection() string {
+	return ql.Collection
+}
+
+func (ql *QueryLog) GetTraceLabels() map[string]string {
+	return map[string]string{
+		observability.LabelOperation: ql.Query,
+		observability.LabelDatabase:  ql.Database,
+		observability.LabelTable:     ql.Collection,
+	}
+}
+
+func (ql *QueryLog) GetMetricLabels() []string {
+	return []string{
+		observability.LabelOperation, ql.Query,
+		observability.LabelHost, ql.Host,
+		observability.LabelDatabase, ql.Database,
+		observability.LabelTable, ql.Collection,
+	}
 }
 
 func (ql *QueryLog) PrettyPrint(writer io.Writer) {

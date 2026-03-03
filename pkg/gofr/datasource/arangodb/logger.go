@@ -2,6 +2,7 @@ package arangodb
 
 import (
 	"fmt"
+	"gofr.dev/pkg/gofr/datasource/observability"
 	"io"
 	"regexp"
 	"strings"
@@ -11,6 +12,7 @@ import (
 type QueryLog struct {
 	Query      string `json:"query"`
 	Duration   int64  `json:"duration"`
+	Host       string `json:"host,omitempty"`
 	Database   string `json:"database,omitempty"`
 	Collection string `json:"collection,omitempty"`
 	Filter     any    `json:"filter,omitempty"`
@@ -25,6 +27,27 @@ func (ql *QueryLog) SetDuration(d int64) {
 
 func (ql *QueryLog) GetOperation() string {
 	return ql.Operation
+}
+
+func (ql *QueryLog) GetCollection() string {
+	return ql.Collection
+}
+
+func (ql *QueryLog) GetTraceLabels() map[string]string {
+	return map[string]string{
+		observability.LabelOperation: ql.Operation,
+		observability.LabelDatabase:  ql.Database,
+		observability.LabelTable:     ql.Collection,
+	}
+}
+
+func (ql *QueryLog) GetMetricLabels() []string {
+	return []string{
+		observability.LabelOperation, ql.Query,
+		observability.LabelHost, ql.Host,
+		observability.LabelDatabase, ql.Database,
+		observability.LabelTable, ql.Collection,
+	}
 }
 
 // PrettyPrint formats the QueryLog for output.

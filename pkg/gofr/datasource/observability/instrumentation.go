@@ -35,11 +35,13 @@ type Observable interface {
 	SetTracer(trace.Tracer)
 }
 
-// QueryLogger is implemented by datasource QueryLog structs.
+// ObservableQuery is implemented by datasource QueryLog structs.
 // It allows OperationStats to set the duration before logging.
-type QueryLogger interface {
+type ObservableQuery interface {
 	SetDuration(d int64)
 	GetOperation() string
+	GetMetricLabels() []string
+	GetTraceLabels() map[string]string
 }
 
 type Instrumenter interface {
@@ -68,10 +70,10 @@ type Instrumenter interface {
 	IncrementCounter(context.Context, string, ...string)
 	// DecrementCounter(context.Context, string, ...string)
 
-	OperationStats(context.Context, QueryLogger, time.Time, string, trace.Span, OperationLabels)
+	OperationStats(context.Context, ObservableQuery, time.Time, trace.Span)
 
 	StartTrace(context.Context, string) (context.Context, trace.Span)
-	AddTrace(context.Context, string, map[string]string) (context.Context, trace.Span)
+	AddTrace(context.Context, ObservableQuery) (context.Context, trace.Span)
 }
 
 // instrumentation provides logging, metrics, and tracing.
@@ -240,29 +242,21 @@ func (i *instrumentation) StartTrace(ctx context.Context, spanName string) (cont
 // Span name and attributes are auto-derived from datasourceName:
 //   - Span name: {datasourceName}-{operation} (e.g., "mongo-insertOne", "arango-query")
 //   - Attributes: prefixed with {datasourceName}. (e.g., "mongo.collection", "arango.DB")
-//   - Always adds: {datasourceName}.operation = operation
 //
 // Parameters:
 //   - ctx: Context for the trace
-//   - operation: Operation name (e.g., "insertOne", "query", "find")
-//   - attributes: Key-value pairs (keys will be prefixed with datasourceName)
+//   - query: ObservableQuery - this is used to extract the information about operation and labels
 //
 // Returns the context with the span and the span itself.
 // If tracer is nil, returns the original context and nil span.
-func (i *instrumentation) AddTrace(ctx context.Context, operation string, attributes map[string]string) (context.Context, trace.Span) {
+func (i *instrumentation) AddTrace(ctx context.Context, query ObservableQuery) (context.Context, trace.Span) {
 	if i.Tracer == nil {
 		return ctx, nil
 	}
 
-	tracerCtx, span := i.Tracer.Start(ctx, i.spanName(operation))
+	tracerCtx, span := i.Tracer.Start(ctx, i.spanName(query.GetOperation()))
 
-	// Always add operation attribute
-	attributes["operation"] = operation
-
-	// Add attributes with {datasourceName}. prefix
-	for key, value := range attributes {
-		span.SetAttributes(attribute.String(i.datasourceName+"."+key, value))
-	}
+	span.SetAttributes(i.getTraceLabelsForDB(query.GetTraceLabels())...)
 
 	return tracerCtx, span
 }
@@ -279,33 +273,45 @@ func (i *instrumentation) spanDurationKey(method string) string {
 	return i.datasourceName + "." + method + ".duration"
 }
 
-// SendOperationStats logs, records metrics, and ends the span for a datasource operation.
+// SendOperationStats logs the query, records performance metrics, and ends the span for a datasource operation.
 // It calculates duration from startTime and sets it on the log via SetDuration.
 // Metric names are automatically derived from the datasourceName set in NewInstrumentation:
 //   - Histogram: app_{datasourceName}_stats
 //   - Span attribute: {datasourceName}.{method}.duration
 //
+// Metric Labels are automatically derived from ObservableQuery
+//
+//
 // Parameters:
 //   - ctx: Context for metrics recording
-//   - log: QueryLog implementing QueryLogger interface
+//   - log: implementing ObservableQuery interface
 //   - startTime: When the operation started (from time.Now() at defer setup)
-//   - method: Operation method name (e.g., "insert", "query", "find")
 //   - span: OpenTelemetry span to end (can be nil)
-//   - labels: Pre-defined labels for histogram metrics
-func (i *instrumentation) OperationStats(ctx context.Context, log QueryLogger,
-	startTime time.Time, method string, span trace.Span, labels OperationLabels) {
+
+func (i *instrumentation) OperationStats(ctx context.Context, query ObservableQuery,
+	startTime time.Time, span trace.Span) {
 	duration := time.Since(startTime).Microseconds()
-	log.SetDuration(duration)
+	query.SetDuration(duration)
 
-	i.Logger.Debug(log)
-
-	labels.operation = log.GetOperation()
+	i.Logger.Debug(query)
 
 	// Convert microseconds to seconds for histogram buckets
-	i.Metrics.RecordHistogram(ctx, i.StatsHistogramName(), float64(duration)/microsecondsPerSecond, labels.toLabels()...)
+	i.Metrics.RecordHistogram(ctx, i.StatsHistogramName(), float64(duration)/microsecondsPerSecond, query.GetMetricLabels()...)
 
 	if span != nil {
-		span.SetAttributes(attribute.Int64(i.spanDurationKey(method), duration))
+		span.SetAttributes(attribute.Int64(i.spanDurationKey(query.GetOperation()), duration))
 		span.End()
 	}
+}
+
+func (i *instrumentation) getTraceLabelsForDB(labels map[string]string) []attribute.KeyValue {
+	traceLabels := make([]attribute.KeyValue, len(labels))
+
+	cnt := 0
+	for k, v := range labels {
+		traceLabels[cnt] = attribute.String(i.datasourceName+"."+k, v)
+		cnt++
+	}
+
+	return traceLabels
 }

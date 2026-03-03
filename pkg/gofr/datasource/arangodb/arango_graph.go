@@ -7,8 +7,6 @@ import (
 	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
-
-	"gofr.dev/pkg/gofr/datasource/observability"
 )
 
 var (
@@ -35,14 +33,11 @@ type Graph struct {
 // Returns ErrGraphExists if the graph already exists.
 // Returns an error if the edgeDefinitions parameter is not of type *EdgeDefinition or is nil.
 func (g *Graph) CreateGraph(ctx context.Context, database, graph string, edgeDefinitions any) error {
-	tracerCtx, span := g.client.instrumentation.AddTrace(ctx, "createGraph", map[string]string{
-		"graph": graph,
-	})
+	ql := &QueryLog{Operation: "createGraph", Host: g.client.endpoint, Database: database, Collection: graph}
 
-	defer g.client.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: "createGraph", Database: database, Collection: graph},
-		time.Now(), "createGraph", span,
-		observability.OperationLabels{Host: g.client.endpoint})
+	tracerCtx, span := g.client.instrumentation.AddTrace(ctx, ql)
+
+	defer g.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	db, err := g.client.client.GetDatabase(tracerCtx, database, nil)
 	if err != nil {
@@ -95,14 +90,11 @@ func (g *Graph) CreateGraph(ctx context.Context, database, graph string, edgeDef
 //
 // Returns an error if the graph does not exist or if there is an issue with the database connection.
 func (g *Graph) DropGraph(ctx context.Context, database, graphName string) error {
-	tracerCtx, span := g.client.instrumentation.AddTrace(ctx, "dropGraph", map[string]string{
-		"graph": graphName,
-	})
+	ql := &QueryLog{Operation: "dropGraph", Host: g.client.endpoint, Database: database, Collection: graphName}
 
-	defer g.client.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: "dropGraph", Database: database},
-		time.Now(), "dropGraph", span,
-		observability.OperationLabels{Host: g.client.endpoint})
+	tracerCtx, span := g.client.instrumentation.AddTrace(ctx, ql)
+
+	defer g.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	db, err := g.client.client.GetDatabase(tracerCtx, database, nil)
 	if err != nil {
@@ -145,14 +137,11 @@ func (c *Client) GetEdges(ctx context.Context, dbName, graphName, edgeCollection
 		return fmt.Errorf("%w: must be *[]arangodb.EdgeDetails", errInvalidResponseType)
 	}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, "getEdges", map[string]string{
-		"DB": dbName, "Graph": graphName, "Collection": edgeCollection, "Vertex": vertexID,
-	})
+	ql := &QueryLog{Operation: "getEdges", Host: c.endpoint, Database: dbName, Collection: edgeCollection}
 
-	defer c.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: "getEdges", Database: dbName, Collection: edgeCollection},
-		time.Now(), "getEdges", span,
-		observability.OperationLabels{Host: c.endpoint, Table: edgeCollection})
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
+
+	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	db, err := c.client.GetDatabase(tracerCtx, dbName, nil)
 	if err != nil {

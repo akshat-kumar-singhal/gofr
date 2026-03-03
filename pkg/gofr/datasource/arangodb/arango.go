@@ -253,14 +253,11 @@ func (c *Client) validateConfig() error {
 //	    fmt.Printf("User: %+v\n", doc)
 //	}
 func (c *Client) Query(ctx context.Context, dbName, query string, bindVars map[string]any, result any, options ...map[string]any) error {
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, "query", map[string]string{
-		"DB": dbName,
-	})
+	ql := &QueryLog{Operation: "query", Host: c.endpoint, Database: dbName, Query: query}
 
-	defer c.instrumentation.OperationStats(ctx,
-		&QueryLog{Operation: "query", Database: dbName, Query: query},
-		time.Now(), "query", span,
-		observability.OperationLabels{Host: c.endpoint})
+	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
+
+	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
 
 	db, err := c.client.GetDatabase(tracerCtx, dbName, nil)
 	if err != nil {
