@@ -32,7 +32,7 @@ type Instrumenter interface {
 	Errorf(format string, args ...any)
 
 	RegisterStatsHistogram(...float64)
-	InstrumentOperation(context.Context, ObservableQuery) (context.Context, func())
+	InstrumentOperation(ctx context.Context, op ObservableQuery) (tracerCtx context.Context, end func())
 }
 
 // instrumentation provides logging, metrics, and tracing.
@@ -148,7 +148,7 @@ func (i *instrumentation) operationStats(query ObservableQuery, startTime time.T
 
 // InstrumentOperation starts a trace span and returns the traced context along with a cleanup
 // function that records operation stats when called (typically via defer).
-func (i *instrumentation) InstrumentOperation(ctx context.Context, op ObservableQuery) (context.Context, func()) {
+func (i *instrumentation) InstrumentOperation(ctx context.Context, op ObservableQuery) (tracerCtx context.Context, end func()) {
 	tracerCtx, span := i.addTrace(ctx, op)
 	startTime := time.Now()
 

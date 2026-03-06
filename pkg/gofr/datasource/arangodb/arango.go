@@ -354,7 +354,7 @@ func (c *Client) HealthCheck(ctx context.Context) (any, error) {
 
 // instrumentQuery sets the Host field on the QueryLog, starts a trace span,
 // and returns the traced context along with a cleanup function that records operation stats.
-func (c *Client) instrumentQuery(ctx context.Context, ql *QueryLog) (context.Context, func()) {
+func (c *Client) instrumentQuery(ctx context.Context, ql *QueryLog) (tracerCtx context.Context, end func()) {
 	ql.Host = c.endpoint
 
 	return c.instrumentation.InstrumentOperation(ctx, ql)

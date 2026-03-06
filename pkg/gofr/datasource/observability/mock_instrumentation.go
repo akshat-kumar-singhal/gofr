@@ -148,7 +148,7 @@ func (mr *MockInstrumenterMockRecorder) RegisterStatsHistogram(buckets ...any) *
 }
 
 // InstrumentOperation mocks base method.
-func (m *MockInstrumenter) InstrumentOperation(ctx context.Context, op ObservableQuery) (context.Context, func()) {
+func (m *MockInstrumenter) InstrumentOperation(ctx context.Context, op ObservableQuery) (tracerCtx context.Context, end func()) {
 	m.ctrl.T.Helper()
 
 	ret := m.ctrl.Call(m, "InstrumentOperation", ctx, op)
