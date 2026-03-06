@@ -11,12 +11,12 @@ import (
 )
 
 func TestAddTrace_WithNilTracer(t *testing.T) {
-	instrumenter := NewInstrumentation("mongo")
+	instrumenter := NewInstrumentation("mongo").(*instrumentation)
 
 	ctx := context.Background()
 	query := newMockQuery("insertOne")
 
-	newCtx, span := instrumenter.AddTrace(ctx, query)
+	newCtx, span := instrumenter.addTrace(ctx, query)
 
 	// Should return original context and nil span
 	assert.Equal(t, ctx, newCtx)
@@ -31,13 +31,13 @@ func TestAddTrace_WithTracer(t *testing.T) {
 		_ = tp.Shutdown(context.Background())
 	}()
 
-	instrumenter := NewInstrumentation("mongo")
+	instrumenter := NewInstrumentation("mongo").(*instrumentation)
 	instrumenter.SetTracer(tp.Tracer("test"))
 
 	ctx := context.Background()
 	query := newMockQuery("insertOne")
 
-	newCtx, span := instrumenter.AddTrace(ctx, query)
+	newCtx, span := instrumenter.addTrace(ctx, query)
 
 	require.NotNil(t, span)
 	assert.NotEqual(t, ctx, newCtx)
@@ -59,7 +59,7 @@ func TestAddTrace_SetsAttributes(t *testing.T) {
 		_ = tp.Shutdown(context.Background())
 	}()
 
-	instrumenter := NewInstrumentation("arango")
+	instrumenter := NewInstrumentation("arango").(*instrumentation)
 	instrumenter.SetTracer(tp.Tracer("test"))
 
 	ctx := context.Background()
@@ -69,7 +69,7 @@ func TestAddTrace_SetsAttributes(t *testing.T) {
 		"database":   "testdb",
 	}
 
-	_, span := instrumenter.AddTrace(ctx, query)
+	_, span := instrumenter.addTrace(ctx, query)
 	require.NotNil(t, span)
 	span.End()
 

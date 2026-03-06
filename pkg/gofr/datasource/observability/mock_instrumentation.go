@@ -5,7 +5,6 @@ package observability
 import (
 	"context"
 	"reflect"
-	"time"
 
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/mock/gomock"
@@ -148,34 +147,21 @@ func (mr *MockInstrumenterMockRecorder) RegisterStatsHistogram(buckets ...any) *
 		mr.mock, "RegisterStatsHistogram", reflect.TypeOf((*MockInstrumenter)(nil).RegisterStatsHistogram), buckets...)
 }
 
-// OperationStats mocks base method.
-func (m *MockInstrumenter) OperationStats(ctx context.Context, query ObservableQuery, startTime time.Time, span trace.Span) {
-	m.ctrl.T.Helper()
-	m.ctrl.Call(m, "OperationStats", ctx, query, startTime, span)
-}
-
-// OperationStats indicates an expected call of OperationStats.
-func (mr *MockInstrumenterMockRecorder) OperationStats(ctx, query, startTime, span any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-
-	return mr.mock.ctrl.RecordCallWithMethodType(
-		mr.mock, "OperationStats", reflect.TypeOf((*MockInstrumenter)(nil).OperationStats), ctx, query, startTime, span)
-}
-
-// AddTrace mocks base method.
-func (m *MockInstrumenter) AddTrace(ctx context.Context, query ObservableQuery) (context.Context, trace.Span) {
+// InstrumentOperation mocks base method.
+func (m *MockInstrumenter) InstrumentOperation(ctx context.Context, op ObservableQuery) (context.Context, func()) {
 	m.ctrl.T.Helper()
 
-	ret := m.ctrl.Call(m, "AddTrace", ctx, query)
+	ret := m.ctrl.Call(m, "InstrumentOperation", ctx, op)
 	ret0, _ := ret[0].(context.Context)
-	ret1, _ := ret[1].(trace.Span)
+	ret1, _ := ret[1].(func())
 
 	return ret0, ret1
 }
 
-// AddTrace indicates an expected call of AddTrace.
-func (mr *MockInstrumenterMockRecorder) AddTrace(ctx, query any) *gomock.Call {
+// InstrumentOperation indicates an expected call of InstrumentOperation.
+func (mr *MockInstrumenterMockRecorder) InstrumentOperation(ctx, op any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "AddTrace", reflect.TypeOf((*MockInstrumenter)(nil).AddTrace), ctx, query)
+	return mr.mock.ctrl.RecordCallWithMethodType(
+		mr.mock, "InstrumentOperation", reflect.TypeOf((*MockInstrumenter)(nil).InstrumentOperation), ctx, op)
 }

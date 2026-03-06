@@ -3,7 +3,6 @@ package arangodb
 import (
 	"context"
 	"errors"
-	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 )
@@ -137,14 +136,13 @@ func (d *Document) isEdgeCollection(ctx context.Context, dbName, collectionName 
 
 func executeCollectionOperation(ctx context.Context, d Document, dbName, collectionName,
 	operation string, documentID string) (arangodb.Collection, context.Context, error) {
-	ql := &QueryLog{Operation: operation, Host: d.client.endpoint, Database: dbName, Collection: collectionName}
+	ql := &QueryLog{Operation: operation, Database: dbName, Collection: collectionName}
 	if documentID != "" {
 		ql.ID = documentID
 	}
 
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
-
-	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := d.client.instrumentQuery(ctx, ql)
+	defer done()
 
 	collection, err := d.client.getCollection(tracerCtx, dbName, collectionName)
 	if err != nil {

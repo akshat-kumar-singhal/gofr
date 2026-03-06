@@ -2,7 +2,6 @@ package arangodb
 
 import (
 	"context"
-	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 )
@@ -15,11 +14,10 @@ type DB struct {
 // It first checks if the database already exists before attempting to create it.
 // Returns ErrDatabaseExists if the database already exists.
 func (d *DB) CreateDB(ctx context.Context, database string) error {
-	ql := &QueryLog{Operation: "createDB", Host: d.client.endpoint, Database: database}
+	ql := &QueryLog{Operation: "createDB", Database: database}
 
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
-
-	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := d.client.instrumentQuery(ctx, ql)
+	defer done()
 
 	// Check if the database already exists
 	exists, err := d.client.client.DatabaseExists(tracerCtx, database)
@@ -39,11 +37,10 @@ func (d *DB) CreateDB(ctx context.Context, database string) error {
 
 // DropDB deletes a database from ArangoDB.
 func (d *DB) DropDB(ctx context.Context, database string) error {
-	ql := &QueryLog{Operation: "dropDB", Host: d.client.endpoint, Database: database}
+	ql := &QueryLog{Operation: "dropDB", Database: database}
 
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
-
-	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := d.client.instrumentQuery(ctx, ql)
+	defer done()
 
 	db, err := d.client.client.GetDatabase(tracerCtx, database, &arangodb.GetDatabaseOptions{})
 	if err != nil {
@@ -62,11 +59,10 @@ func (d *DB) DropDB(ctx context.Context, database string) error {
 // It first checks if the collection already exists before attempting to create it.
 // Returns ErrCollectionExists if the collection already exists.
 func (d *DB) CreateCollection(ctx context.Context, database, collection string, isEdge bool) error {
-	ql := &QueryLog{Operation: "createCollection", Host: d.client.endpoint, Database: database, Collection: collection, Filter: isEdge}
+	ql := &QueryLog{Operation: "createCollection", Database: database, Collection: collection, Filter: isEdge}
 
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
-
-	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := d.client.instrumentQuery(ctx, ql)
+	defer done()
 
 	db, err := d.client.client.GetDatabase(tracerCtx, database, nil)
 	if err != nil {
@@ -120,11 +116,10 @@ func (d *DB) getCollection(ctx context.Context, dbName, collectionName string) (
 // handleCollectionOperation handles common logic for collection operations.
 func (d *DB) handleCollectionOperation(ctx context.Context, operation, database, collectionName string,
 	action func(arangodb.Collection) error) error {
-	ql := &QueryLog{Operation: operation, Host: d.client.endpoint, Database: database, Collection: collectionName}
+	ql := &QueryLog{Operation: operation, Database: database, Collection: collectionName}
 
-	tracerCtx, span := d.client.instrumentation.AddTrace(ctx, ql)
-
-	defer d.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := d.client.instrumentQuery(ctx, ql)
+	defer done()
 
 	collection, err := d.getCollection(tracerCtx, database, collectionName)
 	if err != nil {

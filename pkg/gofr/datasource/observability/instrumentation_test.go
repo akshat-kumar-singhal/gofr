@@ -116,18 +116,18 @@ func TestSetMetrics_WithValidMetrics(t *testing.T) {
 }
 
 func TestSetTracer_WithNil(t *testing.T) {
-	instrumenter := NewInstrumentation("test")
+	instrumenter := NewInstrumentation("test").(*instrumentation)
 
 	// Setting nil tracer should not panic
 	assert.NotPanics(t, func() {
 		instrumenter.SetTracer(nil)
 	})
 
-	// AddTrace should handle nil tracer gracefully
+	// addTrace should handle nil tracer gracefully
 	ctx := context.Background()
 	query := newMockQuery("operation")
 
-	newCtx, span := instrumenter.AddTrace(ctx, query)
+	newCtx, span := instrumenter.addTrace(ctx, query)
 
 	assert.Equal(t, ctx, newCtx)
 	assert.Nil(t, span)
@@ -141,13 +141,13 @@ func TestSetTracer_WithValidTracer(t *testing.T) {
 		_ = tp.Shutdown(context.Background())
 	}()
 
-	instrumenter := NewInstrumentation("test")
+	instrumenter := NewInstrumentation("test").(*instrumentation)
 	instrumenter.SetTracer(tp.Tracer("test-tracer"))
 
 	ctx := context.Background()
 	query := newMockQuery("operation")
 
-	newCtx, span := instrumenter.AddTrace(ctx, query)
+	newCtx, span := instrumenter.addTrace(ctx, query)
 
 	assert.NotEqual(t, ctx, newCtx)
 	require.NotNil(t, span)
@@ -232,7 +232,7 @@ func TestOperationStats(t *testing.T) {
 		_ = tp.Shutdown(context.Background())
 	}()
 
-	instrumenter := NewInstrumentation("mongo")
+	instrumenter := NewInstrumentation("mongo").(*instrumentation)
 	mockLog := newMockLogger()
 	mockMet := newMockMetrics()
 
@@ -245,11 +245,11 @@ func TestOperationStats(t *testing.T) {
 	query.metricLabels = []string{"host", "localhost", "database", "testdb"}
 
 	// Create a span for testing
-	tracerCtx, span := instrumenter.AddTrace(ctx, query)
+	_, span := instrumenter.addTrace(ctx, query)
 
 	startTime := time.Now().Add(-100 * time.Millisecond) // Simulate 100ms operation
 
-	instrumenter.OperationStats(tracerCtx, query, startTime, span)
+	instrumenter.operationStats(query, startTime, span)
 
 	// Verify query was logged
 	require.Len(t, mockLog.debugCalls, 1)
@@ -269,20 +269,19 @@ func TestOperationStats(t *testing.T) {
 }
 
 func TestOperationStats_WithNilSpan(t *testing.T) {
-	instrumenter := NewInstrumentation("mongo")
+	instrumenter := NewInstrumentation("mongo").(*instrumentation)
 	mockLog := newMockLogger()
 	mockMet := newMockMetrics()
 
 	instrumenter.SetLogger(mockLog)
 	instrumenter.SetMetrics(mockMet)
 
-	ctx := context.Background()
 	query := newMockQuery("query")
 	startTime := time.Now().Add(-50 * time.Millisecond)
 
 	// Should not panic with nil span
 	assert.NotPanics(t, func() {
-		instrumenter.OperationStats(ctx, query, startTime, nil)
+		instrumenter.operationStats(query, startTime, nil)
 	})
 
 	// Verify logging and metrics still work
@@ -291,18 +290,17 @@ func TestOperationStats_WithNilSpan(t *testing.T) {
 }
 
 func TestOperationStats_DurationCalculation(t *testing.T) {
-	instrumenter := NewInstrumentation("test")
+	instrumenter := NewInstrumentation("test").(*instrumentation)
 	mockLog := newMockLogger()
 	mockMet := newMockMetrics()
 
 	instrumenter.SetLogger(mockLog)
 	instrumenter.SetMetrics(mockMet)
 
-	ctx := context.Background()
 	query := newMockQuery("operation")
 	startTime := time.Now().Add(-1 * time.Second) // 1 second ago
 
-	instrumenter.OperationStats(ctx, query, startTime, nil)
+	instrumenter.operationStats(query, startTime, nil)
 
 	// Duration should be approximately 1000000 microseconds (1 second)
 	assert.Greater(t, query.duration, int64(900000)) // At least 900ms
@@ -312,4 +310,75 @@ func TestOperationStats_DurationCalculation(t *testing.T) {
 	require.Len(t, mockMet.recordHistogramCalls, 1)
 	histogramValue := mockMet.recordHistogramCalls[0].value
 	assert.InDelta(t, 1.0, histogramValue, 0.5) // Approximately 1 second with 0.5s tolerance
+}
+
+func TestInstrumentOperation(t *testing.T) {
+	exporter := tracetest.NewInMemoryExporter()
+	tp := sdktrace.NewTracerProvider(sdktrace.WithSyncer(exporter))
+
+	defer func() {
+		_ = tp.Shutdown(context.Background())
+	}()
+
+	instrumenter := NewInstrumentation("mongo")
+	mockLog := newMockLogger()
+	mockMet := newMockMetrics()
+
+	instrumenter.SetLogger(mockLog)
+	instrumenter.SetMetrics(mockMet)
+	instrumenter.SetTracer(tp.Tracer("test"))
+
+	ctx := context.Background()
+	query := newMockQuery("insert")
+	query.metricLabels = []string{"host", "localhost", "database", "testdb"}
+
+	tracerCtx, done := instrumenter.InstrumentOperation(ctx, query)
+
+	// Context should have a span
+	assert.NotEqual(t, ctx, tracerCtx)
+
+	// Simulate some work then call done
+	time.Sleep(10 * time.Millisecond)
+	done()
+
+	// Verify query was logged
+	require.Len(t, mockLog.debugCalls, 1)
+	assert.Equal(t, query, mockLog.debugCalls[0])
+
+	// Verify duration was set on query
+	assert.Positive(t, query.duration)
+
+	// Verify histogram was recorded
+	require.Len(t, mockMet.recordHistogramCalls, 1)
+	assert.Equal(t, "app_mongo_stats", mockMet.recordHistogramCalls[0].name)
+
+	// Verify span was ended
+	spans := exporter.GetSpans()
+	require.Len(t, spans, 1)
+}
+
+func TestInstrumentOperation_NilTracer(t *testing.T) {
+	instrumenter := NewInstrumentation("test")
+	mockLog := newMockLogger()
+	mockMet := newMockMetrics()
+
+	instrumenter.SetLogger(mockLog)
+	instrumenter.SetMetrics(mockMet)
+
+	ctx := context.Background()
+	query := newMockQuery("find")
+
+	tracerCtx, done := instrumenter.InstrumentOperation(ctx, query)
+
+	// Without tracer, context should be unchanged
+	assert.Equal(t, ctx, tracerCtx)
+
+	// Calling done should not panic
+	assert.NotPanics(t, func() {
+		done()
+	})
+
+	// Verify logging and metrics still work
+	assert.Len(t, mockLog.debugCalls, 1)
+	assert.Len(t, mockMet.recordHistogramCalls, 1)
 }

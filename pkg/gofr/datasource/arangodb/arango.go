@@ -252,11 +252,10 @@ func (c *Client) validateConfig() error {
 //	    fmt.Printf("User: %+v\n", doc)
 //	}
 func (c *Client) Query(ctx context.Context, dbName, query string, bindVars map[string]any, result any, options ...map[string]any) error {
-	ql := &QueryLog{Operation: "query", Host: c.endpoint, Database: dbName, Query: query}
+	ql := &QueryLog{Operation: "query", Database: dbName, Query: query}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
-
-	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, ql)
+	defer done()
 
 	db, err := c.client.GetDatabase(tracerCtx, dbName, nil)
 	if err != nil {
@@ -351,6 +350,14 @@ func (c *Client) HealthCheck(ctx context.Context) (any, error) {
 	h.Details["server"] = version.Server
 
 	return &h, nil
+}
+
+// instrumentQuery sets the Host field on the QueryLog, starts a trace span,
+// and returns the traced context along with a cleanup function that records operation stats.
+func (c *Client) instrumentQuery(ctx context.Context, ql *QueryLog) (context.Context, func()) {
+	ql.Host = c.endpoint
+
+	return c.instrumentation.InstrumentOperation(ctx, ql)
 }
 
 func (uo *UserOptions) toArangoUserOptions() *arangodb.UserOptions {

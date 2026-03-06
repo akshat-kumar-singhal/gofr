@@ -7,18 +7,14 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
-// AddTrace creates a new span for tracing a datasource operation.
+// addTrace creates a new span for tracing a datasource operation.
 // Span name and attributes are auto-derived from datasourceName:
 //   - Span name: {datasourceName}-{operation} (e.g., "mongo-insertOne", "arango-query")
 //   - Attributes: prefixed with {datasourceName}. (e.g., "mongo.collection", "arango.DB")
 //
-// Parameters:
-//   - ctx: Context for the trace
-//   - query: ObservableQuery - this is used to extract the information about operation and labels
-//
 // Returns the context with the span and the span itself.
 // If tracer is nil, returns the original context and nil span.
-func (i *instrumentation) AddTrace(ctx context.Context, query ObservableQuery) (context.Context, trace.Span) {
+func (i *instrumentation) addTrace(ctx context.Context, query ObservableQuery) (context.Context, trace.Span) {
 	if i.tracer == nil {
 		return ctx, nil
 	}

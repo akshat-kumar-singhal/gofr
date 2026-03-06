@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 )
@@ -33,11 +32,10 @@ type Graph struct {
 // Returns ErrGraphExists if the graph already exists.
 // Returns an error if the edgeDefinitions parameter is not of type *EdgeDefinition or is nil.
 func (g *Graph) CreateGraph(ctx context.Context, database, graph string, edgeDefinitions any) error {
-	ql := &QueryLog{Operation: "createGraph", Host: g.client.endpoint, Database: database, Collection: graph}
+	ql := &QueryLog{Operation: "createGraph", Database: database, Collection: graph}
 
-	tracerCtx, span := g.client.instrumentation.AddTrace(ctx, ql)
-
-	defer g.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := g.client.instrumentQuery(ctx, ql)
+	defer done()
 
 	db, err := g.client.client.GetDatabase(tracerCtx, database, nil)
 	if err != nil {
@@ -90,11 +88,10 @@ func (g *Graph) CreateGraph(ctx context.Context, database, graph string, edgeDef
 //
 // Returns an error if the graph does not exist or if there is an issue with the database connection.
 func (g *Graph) DropGraph(ctx context.Context, database, graphName string) error {
-	ql := &QueryLog{Operation: "dropGraph", Host: g.client.endpoint, Database: database, Collection: graphName}
+	ql := &QueryLog{Operation: "dropGraph", Database: database, Collection: graphName}
 
-	tracerCtx, span := g.client.instrumentation.AddTrace(ctx, ql)
-
-	defer g.client.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := g.client.instrumentQuery(ctx, ql)
+	defer done()
 
 	db, err := g.client.client.GetDatabase(tracerCtx, database, nil)
 	if err != nil {
@@ -137,11 +134,10 @@ func (c *Client) GetEdges(ctx context.Context, dbName, graphName, edgeCollection
 		return fmt.Errorf("%w: must be *[]arangodb.EdgeDetails", errInvalidResponseType)
 	}
 
-	ql := &QueryLog{Operation: "getEdges", Host: c.endpoint, Database: dbName, Collection: edgeCollection, Graph: graphName}
+	ql := &QueryLog{Operation: "getEdges", Database: dbName, Collection: edgeCollection, Graph: graphName}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
-
-	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, ql)
+	defer done()
 
 	db, err := c.client.GetDatabase(tracerCtx, dbName, nil)
 	if err != nil {

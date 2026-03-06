@@ -181,13 +181,13 @@ func TestQueryLog_GetMetricLabels(t *testing.T) {
 		{
 			name: "all fields populated",
 			queryLog: QueryLog{
-				Query:      "FOR doc IN users RETURN doc",
+				Operation:  "query",
 				Host:       "localhost:8529",
 				Database:   "testdb",
 				Collection: "users",
 			},
 			expected: []string{
-				observability.LabelOperation, "FOR doc IN users RETURN doc",
+				observability.LabelOperation, "query",
 				observability.LabelHost, "localhost:8529",
 				observability.LabelDatabase, "testdb",
 				observability.LabelTable, "users",
@@ -206,8 +206,8 @@ func TestQueryLog_GetMetricLabels(t *testing.T) {
 		{
 			name: "partial fields",
 			queryLog: QueryLog{
-				Query: "INSERT",
-				Host:  "arangodb:8529",
+				Operation: "INSERT",
+				Host:      "arangodb:8529",
 			},
 			expected: []string{
 				observability.LabelOperation, "INSERT",

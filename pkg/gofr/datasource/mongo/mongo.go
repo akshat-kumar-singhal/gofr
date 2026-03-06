@@ -235,12 +235,7 @@ func (c *Client) instrumentQuery(ctx context.Context, collection, operation stri
 		Update:     update,
 	}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, query)
-	startTime := time.Now()
-
-	return tracerCtx, func() {
-		c.instrumentation.OperationStats(ctx, query, startTime, span)
-	}
+	return c.instrumentation.InstrumentOperation(ctx, query)
 }
 
 // InsertOne inserts a single document into the specified collection.

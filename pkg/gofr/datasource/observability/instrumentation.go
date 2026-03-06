@@ -32,8 +32,7 @@ type Instrumenter interface {
 	Errorf(format string, args ...any)
 
 	RegisterStatsHistogram(...float64)
-	OperationStats(context.Context, ObservableQuery, time.Time, trace.Span)
-	AddTrace(context.Context, ObservableQuery) (context.Context, trace.Span)
+	InstrumentOperation(context.Context, ObservableQuery) (context.Context, func())
 }
 
 // instrumentation provides logging, metrics, and tracing.
@@ -126,31 +125,34 @@ func (i *instrumentation) RegisterStatsHistogram(buckets ...float64) {
 	i.metrics.NewHistogram(i.statsHistogramName(), description, buckets...)
 }
 
-// OperationStats logs the query, records performance metrics, and ends the span for a datasource operation.
+// operationStats logs the query, records performance metrics, and ends the span for a datasource operation.
 // It calculates duration from startTime and sets it on the log via SetDuration.
 // Metric names are automatically derived from the datasourceName set in NewInstrumentation:
 //   - Histogram: app_{datasourceName}_stats
 //   - Span attribute: {datasourceName}.{method}.duration
-//
-// # Metric Labels are automatically derived from ObservableQuery
-//
-// Parameters:
-//   - ctx: Context for metrics recording
-//   - query: implementing ObservableQuery interface
-//   - startTime: When the operation started (from time.Now() at defer setup)
-//   - span: OpenTelemetry span to end (can be nil)
-func (i *instrumentation) OperationStats(ctx context.Context, query ObservableQuery,
-	startTime time.Time, span trace.Span) {
+func (i *instrumentation) operationStats(query ObservableQuery, startTime time.Time, span trace.Span) {
 	duration := time.Since(startTime).Microseconds()
 	query.SetDuration(duration)
 
 	i.logger.Debug(query)
 
 	// Convert microseconds to seconds for histogram buckets
-	i.metrics.RecordHistogram(ctx, i.statsHistogramName(), float64(duration)/microsecondsPerSecond, query.GetMetricLabels()...)
+	i.metrics.RecordHistogram(context.Background(), i.statsHistogramName(),
+		float64(duration)/microsecondsPerSecond, query.GetMetricLabels()...)
 
 	if span != nil {
 		span.SetAttributes(attribute.Int64(i.spanDurationKey(query.GetOperation()), duration))
 		span.End()
+	}
+}
+
+// InstrumentOperation starts a trace span and returns the traced context along with a cleanup
+// function that records operation stats when called (typically via defer).
+func (i *instrumentation) InstrumentOperation(ctx context.Context, op ObservableQuery) (context.Context, func()) {
+	tracerCtx, span := i.addTrace(ctx, op)
+	startTime := time.Now()
+
+	return tracerCtx, func() {
+		i.operationStats(op, startTime, span)
 	}
 }

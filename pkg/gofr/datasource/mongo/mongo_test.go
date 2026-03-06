@@ -12,7 +12,6 @@ import (
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/integration/mtest"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/mock/gomock"
 	"gofr.dev/pkg/gofr/datasource/observability"
 )
@@ -35,29 +34,25 @@ func newMockClient(mt *mtest.T, instr observability.Instrumenter) *Client {
 	}
 }
 
-// setupMockInstrumenter creates a mock instrumenter with AddTrace and OperationStats expectations.
+// setupMockInstrumenter creates a mock instrumenter with InstrumentOperation expectations.
 // It accepts a gomock.Controller to use the same controller as the test.
 // count controls the expected number of instrumentation calls:
 // - count = 0: No instrumentation calls expected (validation fails before instrumentation)
-// - count = 1: Expects one AddTrace + one OperationStats call.
+// - count = 1: Expects one InstrumentOperation call.
 func setupMockInstrumenter(t *testing.T, ctrl *gomock.Controller, expectedOperation string, count int) *observability.MockInstrumenter {
 	t.Helper()
 
 	mockInstr := observability.NewMockInstrumenter(ctrl)
 
 	mockInstr.EXPECT().
-		AddTrace(gomock.Any(), gomock.Any()).
-		DoAndReturn(func(ctx context.Context, q observability.ObservableQuery) (context.Context, trace.Span) {
+		InstrumentOperation(gomock.Any(), gomock.Any()).
+		DoAndReturn(func(ctx context.Context, q observability.ObservableQuery) (context.Context, func()) {
 			if expectedOperation != "" {
 				assert.Equal(t, expectedOperation, q.GetOperation())
 			}
 
-			return ctx, nil
+			return ctx, func() {}
 		}).Times(count)
-
-	mockInstr.EXPECT().
-		OperationStats(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Times(count)
 
 	return mockInstr
 }

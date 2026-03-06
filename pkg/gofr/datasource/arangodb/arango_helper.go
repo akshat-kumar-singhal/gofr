@@ -3,7 +3,6 @@ package arangodb
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 )
@@ -18,11 +17,10 @@ func (c *Client) database(ctx context.Context, name string) (arangodb.Database, 
 
 // createUser creates a new user in ArangoDB.
 func (c *Client) createUser(ctx context.Context, username string, options any) error {
-	ql := &QueryLog{Operation: "createUser", Host: c.endpoint, ID: username}
+	ql := &QueryLog{Operation: "createUser", ID: username}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
-
-	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, ql)
+	defer done()
 
 	userOptions, ok := options.(UserOptions)
 	if !ok {
@@ -39,11 +37,10 @@ func (c *Client) createUser(ctx context.Context, username string, options any) e
 
 // dropUser deletes a user from ArangoDB.
 func (c *Client) dropUser(ctx context.Context, username string) error {
-	ql := &QueryLog{Operation: "dropUser", Host: c.endpoint, ID: username}
+	ql := &QueryLog{Operation: "dropUser", ID: username}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
-
-	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, ql)
+	defer done()
 
 	err := c.client.RemoveUser(tracerCtx, username)
 	if err != nil {
@@ -55,11 +52,10 @@ func (c *Client) dropUser(ctx context.Context, username string) error {
 
 // grantDB grants permissions for a database to a user.
 func (c *Client) grantDB(ctx context.Context, database, username, permission string) error {
-	ql := &QueryLog{Operation: "grantDB", Host: c.endpoint, Database: database, ID: username}
+	ql := &QueryLog{Operation: "grantDB", Database: database, ID: username}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
-
-	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, ql)
+	defer done()
 
 	user, err := c.client.User(tracerCtx, username)
 	if err != nil {
@@ -73,11 +69,10 @@ func (c *Client) grantDB(ctx context.Context, database, username, permission str
 
 // grantCollection grants permissions for a collection to a user.
 func (c *Client) grantCollection(ctx context.Context, database, collection, username, permission string) error {
-	ql := &QueryLog{Operation: "grantCollection", Host: c.endpoint, Database: database, Collection: collection, ID: username}
+	ql := &QueryLog{Operation: "grantCollection", Database: database, Collection: collection, ID: username}
 
-	tracerCtx, span := c.instrumentation.AddTrace(ctx, ql)
-
-	defer c.instrumentation.OperationStats(ctx, ql, time.Now(), span)
+	tracerCtx, done := c.instrumentQuery(ctx, ql)
+	defer done()
 
 	user, err := c.client.User(tracerCtx, username)
 	if err != nil {
