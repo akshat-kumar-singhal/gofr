@@ -40,13 +40,13 @@ func (ql *QueryLog) GetTraceLabels() map[string]string {
 		observability.LabelOperation: ql.Operation,
 		observability.LabelDatabase:  ql.Database,
 		observability.LabelTable:     ql.Collection,
-		"graph":                      ql.Graph,
+		observability.LabelGraph:     ql.Graph,
 	}
 }
 
 func (ql *QueryLog) GetMetricLabels() []string {
 	return []string{
-		observability.LabelOperation, ql.Query,
+		observability.LabelOperation, ql.Operation,
 		observability.LabelHost, ql.Host,
 		observability.LabelDatabase, ql.Database,
 		observability.LabelTable, ql.Collection,
