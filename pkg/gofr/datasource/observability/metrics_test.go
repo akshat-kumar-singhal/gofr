@@ -62,11 +62,6 @@ func TestMetricLabelConstants(t *testing.T) {
 			constant: LabelTable,
 			expected: "table",
 		},
-		{
-			name:     "LabelBucket",
-			constant: LabelBucket,
-			expected: "bucket",
-		},
 	}
 
 	for _, tt := range tests {

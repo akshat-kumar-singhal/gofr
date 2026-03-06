@@ -39,7 +39,7 @@ type Redis interface {
 
 // Cassandra is an interface representing a cassandra database.
 //
-// Deprecated: Cassandra interface is deprecated and will be removed in future releases, users must use CassandraWithContext.
+// Cassandra is deprecated: Use CassandraWithContext instead.
 type Cassandra interface {
 	// Deprecated: Query method is deprecated and will be removed in future releases, users must use QueryWithCtx.
 	// Query executes the query and binds the result into dest parameter.
@@ -188,8 +188,7 @@ type CassandraBatchWithContext interface {
 	ExecuteBatchCASWithCtx(ctx context.Context, name string, dest ...any) (bool, error)
 }
 
-// CassandraProvider is deprecated: Use CassandraWithContext interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// CassandraProvider is deprecated: Use CassandraWithContext combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type CassandraProvider interface {
 	CassandraWithContext
 
@@ -204,8 +203,7 @@ type Clickhouse interface {
 	HealthChecker
 }
 
-// ClickhouseProvider is deprecated: Use Clickhouse interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// ClickhouseProvider is deprecated: Use Clickhouse combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type ClickhouseProvider interface {
 	Clickhouse
 
@@ -227,8 +225,7 @@ type OracleTx interface {
 	Rollback() error
 }
 
-// OracleProvider is deprecated: Use OracleDB interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// OracleProvider is deprecated: Use OracleDB combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type OracleProvider interface {
 	OracleDB
 
@@ -297,10 +294,7 @@ type Transaction interface {
 	EndSession(context.Context)
 }
 
-// MongoProvider is deprecated: Use Mongo interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It extends Mongo with additional methods for logging, metrics, and connection management,
-// which is used for initializing datasource.
+// MongoProvider is deprecated: Use Mongo combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type MongoProvider interface {
 	Mongo
 
@@ -344,26 +338,22 @@ type SurrealDB interface {
 	HealthChecker
 }
 
-// SurrealBDProvider is deprecated: Use SurrealDB interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It extends SurrealDB with additional methods for logging, metrics, or connection management.
-// It is typically used for initializing and managing SurrealDB-based data sources.
+// SurrealBDProvider is deprecated: Use SurrealDB combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type SurrealBDProvider interface {
 	SurrealDB
 
 	provider
 }
 
-// Deprecated: Use datasource.Observable interface with SetLogger/SetMetrics/SetTracer instead.
-// This interface will be removed in a future version.
+// Deprecated: Use observability.Observable (gofr.dev/pkg/gofr/datasource/observability) interface with SetLogger/SetMetrics/SetTracer instead.
 type provider interface {
-	// Deprecated: Use SetLogger from datasource.Observable instead.
+	// Deprecated: Use SetLogger from observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 	UseLogger(logger any)
 
-	// Deprecated: Use SetMetrics from datasource.Observable instead.
+	// Deprecated: Use SetMetrics from observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 	UseMetrics(metrics any)
 
-	// Deprecated: Use SetTracer from datasource.Observable instead.
+	// Deprecated: Use SetTracer from observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 	UseTracer(tracer any)
 
 	// Connect establishes a connection using the provided configuration.
@@ -384,16 +374,14 @@ type KVStore interface {
 	HealthChecker
 }
 
-// KVStoreProvider is deprecated: Use KVStore interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// KVStoreProvider is deprecated: Use KVStore combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type KVStoreProvider interface {
 	KVStore
 
 	provider
 }
 
-// PubSubProvider is deprecated: Use pubsub.Client interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// PubSubProvider is deprecated: Use pubsub.Client combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type PubSubProvider interface {
 	pubsub.Client
 
@@ -415,8 +403,7 @@ type Solr interface {
 	HealthChecker
 }
 
-// SolrProvider is deprecated: Use Solr interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// SolrProvider is deprecated: Use Solr combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type SolrProvider interface {
 	Solr
 
@@ -503,16 +490,13 @@ type Dgraph interface {
 	HealthChecker
 }
 
-// DgraphProvider is deprecated: Use Dgraph interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It extends Dgraph with connection management capabilities.
+// DgraphProvider is deprecated: Use Dgraph combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type DgraphProvider interface {
 	Dgraph
 	provider
 }
 
-// OpenTSDBProvider is deprecated: Use OpenTSDB interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// OpenTSDBProvider is deprecated: Use OpenTSDB combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type OpenTSDBProvider interface {
 	OpenTSDB
 	provider
@@ -652,8 +636,7 @@ type ScyllaDB interface {
 	HealthChecker
 }
 
-// ScyllaDBProvider is deprecated: Use ScyllaDB interface with datasource.Observable instead.
-// This interface will be removed in a future version.
+// ScyllaDBProvider is deprecated: Use ScyllaDB combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type ScyllaDBProvider interface {
 	ScyllaDB
 	provider
@@ -722,9 +705,7 @@ type ArangoDB interface {
 	HealthChecker
 }
 
-// ArangoDBProvider is deprecated: Use ArangoDB interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It extends ArangoDB with additional methods for logging, metrics, and connection management.
+// ArangoDBProvider is deprecated: Use ArangoDB combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type ArangoDBProvider interface {
 	ArangoDB
 
@@ -764,9 +745,7 @@ type Elasticsearch interface {
 	HealthChecker
 }
 
-// ElasticsearchProvider is deprecated: Use Elasticsearch interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It extends Elasticsearch with additional methods for logging, metrics, and connection management.
+// ElasticsearchProvider is deprecated: Use Elasticsearch combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type ElasticsearchProvider interface {
 	Elasticsearch
 
@@ -806,19 +785,14 @@ type Couchbase interface {
 	HealthChecker
 }
 
-// CouchbaseProvider is deprecated: Use Couchbase interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It extends Couchbase with additional methods for logging, metrics, tracing, and connection management,
-// aligning with other data source providers in this package.
+// CouchbaseProvider is deprecated: Use Couchbase combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type CouchbaseProvider interface {
 	Couchbase
 
 	provider
 }
 
-// DBResolverProvider is deprecated: Use DBResolver interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It defines an interface for SQL read/write splitting providers.
+// DBResolverProvider is deprecated: Use DBResolver combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type DBResolverProvider interface {
 	GetResolver() DB
 
@@ -863,9 +837,7 @@ type InfluxDB interface {
 	HealthChecker
 }
 
-// InfluxDBProvider is deprecated: Use InfluxDB interface with datasource.Observable instead.
-// This interface will be removed in a future version.
-// It extends InfluxDB with additional methods for logging, metrics, and connection management.
+// InfluxDBProvider is deprecated: Use InfluxDB combined with observability.Observable (gofr.dev/pkg/gofr/datasource/observability) instead.
 type InfluxDBProvider interface {
 	InfluxDB
 

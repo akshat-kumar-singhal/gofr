@@ -13,7 +13,6 @@ const (
 	LabelDatabase  = "database"  // Database name
 	LabelOperation = "operation" // Operation type (query, insert, get, etc.)
 	LabelTable     = "table"     // Table/collection name
-	LabelBucket    = "bucket"    // Bucket name (for KV stores)
 	LabelGraph     = "graph"     // Graph for ArangoDB
 )
 
