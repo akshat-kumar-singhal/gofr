@@ -28,6 +28,52 @@ func TestLocalFileSystem_StatMissingNameIsNotFound(t *testing.T) {
 	assert.Equal(t, []string{statusNotFound}, metrics.statuses())
 }
 
+// TestLocalFileSystem_OpenMissingFileIsNotFound checks that the local store's own Open and
+// OpenFile record NOT_FOUND for a missing file, as Stat does, while any other failure, such
+// as opening a directory for writing, still records ERROR.
+func TestLocalFileSystem_OpenMissingFileIsNotFound(t *testing.T) {
+	logger := NewMockLogger(gomock.NewController(t))
+	logger.EXPECT().Debug(gomock.Any()).AnyTimes()
+
+	dir := t.TempDir()
+	missing := filepath.Join(dir, "missing.txt")
+
+	tests := []struct {
+		desc       string
+		open       func(fs FileSystem) error
+		wantStatus string
+	}{
+		{desc: "Open", open: func(fs FileSystem) error {
+			_, err := fs.Open(missing)
+			return err
+		}, wantStatus: statusNotFound},
+		{desc: "OpenFile read only", open: func(fs FileSystem) error {
+			_, err := fs.OpenFile(missing, os.O_RDONLY, 0)
+			return err
+		}, wantStatus: statusNotFound},
+		{desc: "OpenFile read and write", open: func(fs FileSystem) error {
+			_, err := fs.OpenFile(missing, os.O_RDWR, 0)
+			return err
+		}, wantStatus: statusNotFound},
+		{desc: "OpenFile of a directory for writing", open: func(fs FileSystem) error {
+			_, err := fs.OpenFile(dir, os.O_WRONLY, 0)
+			return err
+		}, wantStatus: StatusError},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.desc, func(t *testing.T) {
+			metrics := &recordingMetrics{}
+			fs := &localFileSystem{CommonFileSystem: &CommonFileSystem{
+				Provider: &localProvider{}, Location: localLocation, Logger: logger, Metrics: metrics,
+			}}
+
+			require.Error(t, tc.open(fs))
+			assert.Equal(t, []string{tc.wantStatus}, metrics.statuses())
+		})
+	}
+}
+
 func TestLocalProvider_NewReaderAndNewRangeReader_LimitedAndFull(t *testing.T) {
 	provider := &localProvider{}
 

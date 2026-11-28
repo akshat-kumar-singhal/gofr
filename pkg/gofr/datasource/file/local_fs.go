@@ -78,7 +78,7 @@ func (l *localFileSystem) Open(name string) (File, error) {
 	startTime := time.Now()
 
 	f, err := os.Open(name)
-	l.observe(OpOpen, name, startTime, err, fmt.Sprintf("Opened %q for reading", name))
+	l.observeOpen(OpOpen, name, startTime, err, fmt.Sprintf("Opened %q for reading", name))
 
 	if err != nil {
 		return nil, notFound(err)
@@ -101,7 +101,7 @@ func (l *localFileSystem) OpenFile(name string, flag int, perm os.FileMode) (Fil
 	startTime := time.Now()
 
 	f, err := openFile(name, flag, perm)
-	l.observe(OpOpenFile, name, startTime, err, fmt.Sprintf("Opened %q with flags %d", name, flag))
+	l.observeOpen(OpOpenFile, name, startTime, err, fmt.Sprintf("Opened %q with flags %d", name, flag))
 
 	if err != nil {
 		return l.failedOpen(name, flag, notFound(err))
@@ -138,6 +138,17 @@ func (l *localFileSystem) Rename(oldname, newname string) error {
 // observe records an operation of the local store like CommonFileSystem.Observe.
 func (l *localFileSystem) observe(operation, name string, startTime time.Time, err error, successMsg string) {
 	st, msg := outcome(operation, name, err, successMsg)
+	l.Observe(operation, startTime, &st, &msg)
+}
+
+// observeOpen records an open like observe, except that a missing file is NOT_FOUND, as
+// CommonFileSystem.Open and Stat record it, so dashboards don't count misses as failures.
+func (l *localFileSystem) observeOpen(operation, name string, startTime time.Time, err error, successMsg string) {
+	st, msg := outcome(operation, name, err, successMsg)
+	if st == StatusError {
+		st = missingStatus(err)
+	}
+
 	l.Observe(operation, startTime, &st, &msg)
 }
 
